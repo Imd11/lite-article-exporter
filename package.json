@@ -1,0 +1,31 @@
+{
+  "name": "lite-article-exporter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/postbuild.mjs",
+    "package": "npm run build && node scripts/package.mjs",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "docx": "^9.5.1",
+    "pdf-lib": "^1.17.1",
+    "turndown": "^7.1.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.246",
+    "@types/node": "^20.10.6",
+    "@types/turndown": "^5.0.5",
+    "archiver": "^7.0.1",
+    "buffer": "^6.0.3",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "vite-plugin-node-polyfills": "^0.24.0"
+  }
+}
