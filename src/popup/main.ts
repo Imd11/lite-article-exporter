@@ -2,6 +2,7 @@ import type { ArticleData, DownloadRecord, ExportFormat } from "../types/index";
 import { fetchArticle } from "../utils/extractor";
 import { buildExportPayloads } from "../utils/exporters";
 import { slugify, buildDocumentBaseName } from "../utils/files";
+import { t, getFormatOptions } from "../utils/i18n";
 
 interface State {
   article: ArticleData | null;
@@ -19,13 +20,6 @@ const state: State = {
   historyFilter: ""
 };
 
-const formatOptions: Array<{ value: ExportFormat; label: string; description: string; icon: string }> = [
-  { value: "markdown", label: "Markdown", description: "保留结构，可用于笔记", icon: "📝" },
-  { value: "word", label: "Word", description: "专业DOCX格式，固定排版", icon: "📄" },
-  { value: "pdf", label: "PDF", description: "适合分享与存档", icon: "📕" },
-  { value: "text", label: "TXT", description: "纯文本提要", icon: "📃" }
-];
-
 const STORAGE_KEYS = {
   formatSelection: "smartArticleExporter:lastFormats"
 };
@@ -33,26 +27,30 @@ const STORAGE_KEYS = {
 const DEFAULT_FORMATS: ExportFormat[] = ["markdown"];
 
 const app = document.getElementById("app") as HTMLDivElement;
-app.innerHTML = `
+
+// 使用 i18n 渲染 HTML
+function renderUI() {
+  const formats = getFormatOptions();
+
+  app.innerHTML = `
   <section class="section card">
     <div>
-      <h1>文章提取与导出</h1>
+      <h1>${t("appTitle")}</h1>
       <p class="status" id="status" role="status" aria-live="polite"></p>
     </div>
     <form id="export-form">
-      <label for="url-input">输入公众号或网页链接</label>
-      <input id="url-input" type="url" name="url" placeholder="https://" required />
+      <label for="url-input">${t("urlInputLabel")}</label>
+      <input id="url-input" type="url" name="url" placeholder="${t("urlPlaceholder")}" required />
       <div class="section">
-        <label>选择导出格式</label>
+        <label>${t("formatSelectLabel")}</label>
         <div class="options-grid" id="format-options">
-          ${formatOptions
+          ${formats
             .map(
               option => `
               <label class="option-tile">
                 <input type="checkbox" name="formats" value="${option.value}" />
                 <span>
-                  <strong>${option.icon} ${option.label}</strong><br />
-                  <small>${option.description}</small>
+                  <strong>${option.icon} ${option.label}</strong>
                 </span>
               </label>
             `
@@ -60,7 +58,7 @@ app.innerHTML = `
             .join("")}
         </div>
       </div>
-      <button type="submit" id="export-button">一键下载</button>
+      <button type="submit" id="export-button">${t("downloadButton")}</button>
     </form>
   </section>
   <section class="section" id="preview-section" hidden>
@@ -73,16 +71,18 @@ app.innerHTML = `
   </section>
   <section class="history card" id="history-section">
     <div class="history-header">
-      <h2>下载记录</h2>
+      <h2>${t("historyTitle")}</h2>
       <div class="history-toolbar">
-        <input type="search" id="history-search" placeholder="搜索标题或链接" aria-label="搜索下载记录" />
-        <button type="button" id="history-clear">清空</button>
+        <input type="search" id="history-search" placeholder="${t("historySearchPlaceholder")}" aria-label="${t("historySearchPlaceholder")}" />
+        <button type="button" id="history-clear">${t("historyClearButton")}</button>
       </div>
     </div>
     <div id="history-list"></div>
   </section>
 `;
+}
 
+renderUI();
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const formEl = document.getElementById("export-form") as HTMLFormElement;
@@ -117,7 +117,7 @@ async function initialize() {
     urlInput.value = activeUrl;
     await ensureArticle(activeUrl);
   } else {
-    setStatus("请粘贴微信公众号文章或网页链接");
+    setStatus(t("statusIdle"));
     updateExportButtonState();
   }
 }
@@ -126,9 +126,9 @@ function handleUrlInputChange() {
   state.article = null;
   previewSection.hidden = true;
   if (urlInput.value.trim().length === 0) {
-    setStatus("请粘贴微信公众号文章或网页链接");
+    setStatus(t("statusIdle"));
   } else {
-    setStatus("链接已更新，点击一键下载即可完成导出");
+    setStatus(t("statusExtracted"));
   }
   updateExportButtonState();
 }
@@ -140,7 +140,7 @@ async function restoreFormatSelection() {
     const formats = storedFormats && storedFormats.length ? storedFormats : DEFAULT_FORMATS;
     applyFormatSelection(formats);
   } catch (error) {
-    console.warn("恢复导出格式失败", error);
+    console.warn("Failed to restore format selection", error);
     applyFormatSelection(DEFAULT_FORMATS);
   }
 }
@@ -166,7 +166,7 @@ function handleFormatChange() {
   const selected = getSelectedFormats();
   if (!selected.length) {
     applyFormatSelection(DEFAULT_FORMATS);
-    setStatus("至少需要一种导出格式，已恢复默认 Markdown", true);
+    setStatus(t("statusFormatRequired"), true);
   }
   updateExportButtonState();
 }
@@ -180,7 +180,7 @@ async function handleHistoryClearClick() {
   if (!state.history.length) {
     return;
   }
-  if (!confirm("确认清空全部下载记录？")) {
+  if (!confirm(t("historyConfirmClear"))) {
     return;
   }
   await sendMessage({ type: "clearHistory" });
@@ -188,19 +188,19 @@ async function handleHistoryClearClick() {
   state.historyFilter = "";
   historySearchInput.value = "";
   renderHistory();
-  setStatus("下载记录已清空。");
+  setStatus(t("historyCleared"));
 }
 
 async function handleExportSubmit(event: Event) {
   event.preventDefault();
   const url = urlInput.value.trim();
   if (!url) {
-    setStatus("请粘贴微信公众号文章或网页链接", true);
+    setStatus(t("statusUrlRequired"), true);
     return;
   }
 
   if (!isHttpUrl(url)) {
-    setStatus("仅支持 http 或 https 协议的网页", true);
+    setStatus(t("statusHttpRequired"), true);
     return;
   }
 
@@ -213,7 +213,7 @@ async function handleExportSubmit(event: Event) {
 
   const selectedFormats = getSelectedFormats();
   if (!selectedFormats.length) {
-    setStatus("至少选择一种导出格式", true);
+    setStatus(t("statusFormatRequired"), true);
     return;
   }
 
@@ -222,16 +222,26 @@ async function handleExportSubmit(event: Event) {
 
 async function ensureArticle(url: string): Promise<ArticleData | null> {
   setLoading(true);
-  setStatus("正在提取正文，请稍候...");
+  setStatus(t("statusExtracting"));
   try {
     const article = await fetchArticle(url);
     state.article = article;
     renderArticle(article);
-    setStatus("提取完成，点击一键下载即可导出。", false);
+    setStatus(t("statusExtracted"), false);
     return article;
   } catch (error) {
     console.error(error);
-    const message = error instanceof Error ? error.message : "提取失败，请稍后再试";
+    let message = error instanceof Error ? error.message : t("statusExtractFailed");
+
+    // Enhanced error messages
+    if (message.includes("dynamic") || message.includes("Substack") || message.includes("Medium")) {
+      message = t("statusDynamicSite");
+    } else if (message.includes("browser") || message.includes("tab")) {
+      message = t("statusNoTabFound");
+    } else if (message.includes("too short") || message.includes("paywall")) {
+      message = t("statusContentTooShort");
+    }
+
     setStatus(message, true);
     state.article = null;
     previewSection.hidden = true;
@@ -263,7 +273,7 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
 
   state.isExporting = true;
   updateExportButtonState();
-  setStatus("正在生成文档并下载...");
+  setStatus(t("statusDownloading"));
 
   try {
     const payloads = await buildExportPayloads(article, selectedFormats, {
@@ -274,11 +284,11 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
       await triggerBlobDownload(payload.blob, payload.fileName);
     }
 
-    setStatus("导出完成，可在下载文件夹中查看。", false);
+    setStatus(t("statusSuccess"), false);
     await chrome.storage.local.set({ [STORAGE_KEYS.formatSelection]: selectedFormats });
   } catch (error) {
     console.error(error);
-    const message = error instanceof Error ? error.message : "导出失败";
+    const message = error instanceof Error ? error.message : t("statusExportFailed");
     setStatus(message, true);
     await sendMessage({
       type: "updateRecord",
@@ -302,11 +312,13 @@ function getSelectedFormats(): ExportFormat[] {
 function renderArticle(article: ArticleData) {
   articleTitleEl.textContent = article.title;
   const metaParts: string[] = [];
-  if (article.byline) metaParts.push(`作者：${article.byline}`);
-  metaParts.push(`来源：${new URL(article.url).hostname}`);
+  if (article.byline) metaParts.push(`${t("metaAuthor")}：${article.byline}`);
+  metaParts.push(`${t("metaSource")}：${new URL(article.url).hostname}`);
   articleMetaEl.textContent = metaParts.join(" · ");
   articleExcerptEl.textContent = article.excerpt || article.textContent.slice(0, 120);
-  articleStatsEl.textContent = `字数约 ${Math.round(article.textContent.length / 2)} 字 · 图片 ${article.images.length} 张`;
+  const wordCount = Math.round(article.textContent.length / 2);
+  const imageCount = article.images.length;
+  articleStatsEl.textContent = `${t("metaWords")}约 ${wordCount} ${t("metaWords")} · ${t("metaImages")} ${imageCount} ${t("metaImages")}`;
   previewSection.hidden = false;
   updateExportButtonState();
 }
@@ -319,10 +331,9 @@ async function loadHistory() {
       renderHistory();
     }
   } catch (error) {
-    console.warn("加载历史记录失败", error);
+    console.warn("Failed to load history", error);
   }
 }
-
 
 function escapeHtmlInline(value: string): string {
   return value
@@ -332,6 +343,7 @@ function escapeHtmlInline(value: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
 function renderHistory() {
   const keyword = state.historyFilter.trim().toLowerCase();
   const filtered = state.history.filter(record => {
@@ -343,7 +355,7 @@ function renderHistory() {
   });
 
   if (!filtered.length) {
-    historyList.innerHTML = `<p class="status">暂无匹配记录</p>`;
+    historyList.innerHTML = `<p class="status">${t("historyNoMatches")}</p>`;
     return;
   }
 
@@ -351,7 +363,7 @@ function renderHistory() {
     .map(record => {
       const date = new Date(record.timestamp);
       const formatText = record.formats.join(" · ");
-      const statusText = record.status === "success" ? "已完成" : "失败";
+      const statusText = record.status === "success" ? t("historyStatusSuccess") : t("historyStatusError");
       const statusClass = record.status === "success" ? "" : "status error";
       const safeTitle = escapeHtmlInline(record.title);
       const safeUrl = escapeHtmlInline(record.url);
@@ -361,7 +373,7 @@ function renderHistory() {
         <div class="history-item">
           <strong>${safeTitle}</strong>
           <span>${date.toLocaleString()}</span>
-          <span>格式：${formatText}</span>
+          <span>${t("historyFormatLabel")}：${formatText}</span>
           <span class="${statusClass}">${statusText}${errorText}</span>
           <span class="history-link">${link}</span>
         </div>
@@ -438,7 +450,7 @@ async function getActiveTabUrl(): Promise<string | null> {
     if (!tab?.url) return null;
     return isHttpUrl(tab.url) ? tab.url : null;
   } catch (error) {
-    console.warn("获取当前标签页链接失败", error);
+    console.warn("Failed to get active tab URL", error);
     return null;
   }
 }

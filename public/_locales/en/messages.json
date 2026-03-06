@@ -1,0 +1,178 @@
+{
+  "extName": {
+    "message": "Smart Export Lite",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Extract clean article content and export to Markdown, Word, PDF, or TXT while preserving image links.",
+    "description": "Extension description"
+  },
+  "appTitle": {
+    "message": "Article Extractor & Exporter",
+    "description": "Main title"
+  },
+  "urlInputLabel": {
+    "message": "Enter article URL",
+    "description": "Label for URL input"
+  },
+  "urlPlaceholder": {
+    "message": "https://",
+    "description": "Placeholder for URL input"
+  },
+  "formatSelectLabel": {
+    "message": "Select export format",
+    "description": "Label for format selection"
+  },
+  "formatMarkdown": {
+    "message": "Markdown",
+    "description": "Markdown format name"
+  },
+  "formatMarkdownDesc": {
+    "message": "Preserve structure, great for notes",
+    "description": "Markdown format description"
+  },
+  "formatWord": {
+    "message": "Word",
+    "description": "Word format name"
+  },
+  "formatWordDesc": {
+    "message": "Professional DOCX, fixed layout",
+    "description": "Word format description"
+  },
+  "formatPdf": {
+    "message": "PDF",
+    "description": "PDF format name"
+  },
+  "formatPdfDesc": {
+    "message": "Great for sharing & archiving",
+    "description": "PDF format description"
+  },
+  "formatText": {
+    "message": "TXT",
+    "description": "Plain text format name"
+  },
+  "formatTextDesc": {
+    "message": "Plain text summary",
+    "description": "Plain text format description"
+  },
+  "downloadButton": {
+    "message": "Download",
+    "description": "Download button text"
+  },
+  "historyTitle": {
+    "message": "Download History",
+    "description": "History section title"
+  },
+  "historySearchPlaceholder": {
+    "message": "Search by title or URL",
+    "description": "History search placeholder"
+  },
+  "historyClearButton": {
+    "message": "Clear All",
+    "description": "Clear history button"
+  },
+  "statusIdle": {
+    "message": "Paste a URL to extract article content",
+    "description": "Idle status message"
+  },
+  "statusExtracting": {
+    "message": "Extracting article, please wait...",
+    "description": "Extracting status message"
+  },
+  "statusExtracted": {
+    "message": "Article extracted. Click Download to export.",
+    "description": "Extraction complete status"
+  },
+  "statusDownloading": {
+    "message": "Generating documents and downloading...",
+    "description": "Downloading status message"
+  },
+  "statusSuccess": {
+    "message": "Export complete. Check your downloads folder.",
+    "description": "Export success message"
+  },
+  "statusUrlRequired": {
+    "message": "Please paste an article URL",
+    "description": "URL required error"
+  },
+  "statusFormatRequired": {
+    "message": "Please select at least one format",
+    "description": "Format required error"
+  },
+  "statusHttpRequired": {
+    "message": "Only http or https URLs are supported",
+    "description": "HTTP URL required error"
+  },
+  "statusExtractFailed": {
+    "message": "Failed to extract article. Please try again.",
+    "description": "Extraction failed error"
+  },
+  "statusExportFailed": {
+    "message": "Export failed",
+    "description": "Export failed error"
+  },
+  "statusNoTabFound": {
+    "message": "Could not find the page in any open tab. Please make sure the page is open in your browser and fully loaded, then try again.",
+    "description": "No matching tab found error"
+  },
+  "statusDynamicSite": {
+    "message": "This website uses dynamic loading. Please open the page in your browser, wait for it to fully load, then click the extension icon.",
+    "description": "Dynamic site warning"
+  },
+  "statusContentTooShort": {
+    "message": "Extracted content is too short. This may be a paywalled or restricted page.",
+    "description": "Content too short error"
+  },
+  "previewTitle": {
+    "message": "Article Preview",
+    "description": "Preview section title"
+  },
+  "historyEmpty": {
+    "message": "No download history",
+    "description": "Empty history message"
+  },
+  "historyConfirmClear": {
+    "message": "Are you sure you want to clear all download history?",
+    "description": "Confirm clear history"
+  },
+  "historyCleared": {
+    "message": "Download history cleared.",
+    "description": "History cleared message"
+  },
+  "historyNoMatches": {
+    "message": "No matching items",
+    "description": "No search results"
+  },
+  "metaAuthor": {
+    "message": "Author",
+    "description": "Author label"
+  },
+  "metaSource": {
+    "message": "Source",
+    "description": "Source label"
+  },
+  "metaWords": {
+    "message": "words",
+    "description": "Word count label"
+  },
+  "metaImages": {
+    "message": "images",
+    "description": "Image count label"
+  },
+  "historyStatusSuccess": {
+    "message": "Completed",
+    "description": "Success status in history"
+  },
+  "historyStatusError": {
+    "message": "Failed",
+    "description": "Error status in history"
+  },
+  "historyFormatLabel": {
+    "message": "Format",
+    "description": "Format label in history"
+  },
+  "defaultTitle": {
+    "message": "Untitled Article",
+    "description": "Default article title"
+  }
+}
