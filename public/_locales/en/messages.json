@@ -1,6 +1,6 @@
 {
   "extName": {
-    "message": "Smart Export Lite",
+    "message": "Lite Article Exporter",
     "description": "Extension name"
   },
   "extDescription": {
@@ -8,7 +8,7 @@
     "description": "Extension description"
   },
   "appTitle": {
-    "message": "Article Extractor & Exporter",
+    "message": "Lite Article Exporter",
     "description": "Main title"
   },
   "urlInputLabel": {

@@ -1,92 +1,90 @@
 # Lite Article Exporter
 
-一个基于 Manifest V3 的 Chrome 扩展，自动读取当前网页或手动输入的链接，提取正文与图片、去除广告，并一键导出为 Markdown、Word、PDF、TXT 等格式。所有图片均保留外链地址，界面简洁并内置导出记录。核心逻辑使用 TypeScript 实现。
+Lite Article Exporter is a Chrome extension that extracts the main content from web articles and exports it as Markdown, Word, PDF, or TXT.
 
-## 功能亮点
-- 🔍 **智能提取**：使用 Mozilla Readability 算法，去除脚本、广告与噪声，只保留正文与图像。
-- 📤 **多格式导出**：支持 Markdown、Word（.doc）、PDF、TXT 四种格式，图片链接自动保留。
-- 🖼️ **图片策略**：始终保留图片外链地址，确保文档更轻量。
-- 🧾 **下载记录**：支持搜索与一键清空，快速定位历史记录。
-- 🧠 **智能记忆**：记住上次勾选的导出格式，默认勾选最常用的 Markdown。
-- 🛡️ **安全处理**：遵循最小权限原则，所有导出均在本地完成，无需上传数据。
+It is built for people who save useful articles for research, writing, study, and long-term reference, but do not want to keep noisy web pages full of ads, sidebars, and broken formatting.
 
-## 项目结构
+Chrome Web Store:
+https://chromewebstore.google.com/detail/lite-article-exporter/cemcpicgpndenhnkegmohoncnjhnknie
+
+## Features
+
+- Extracts clean article content with Mozilla Readability
+- Removes common page clutter and keeps the main text readable
+- Exports to Markdown, Word, PDF, and TXT
+- Preserves image links instead of downloading and embedding large assets
+- Works better on logged-in or dynamic pages by reading from the active tab when needed
+- Stores export history and format preferences locally
+
+## Why this exists
+
+We live in a knowledge-heavy era, but saving good information is still harder than it should be. Useful articles often disappear into unread bookmarks or messy full-page saves. This project tries to make article collection simpler: keep the content, drop the clutter, and export into formats that are easier to reuse.
+
+## Tech stack
+
+- Manifest V3
+- TypeScript
+- Vite
+- `@mozilla/readability`
+- `turndown`
+- `pdf-lib`
+
+## Project structure
+
+```text
+lite-article-exporter/
+├── public/                 # Manifest, locales, icons
+├── src/background/         # Service worker
+├── src/popup/              # Popup UI
+├── src/utils/              # Extraction and export logic
+├── scripts/                # Build and packaging helpers
+├── docs/                   # Additional docs
+└── packages/               # Generated release zips
 ```
-Chrome-Extensions/
-├── public/
-│   └── manifest.json        # Manifest V3 配置
-├── src/
-│   ├── background/          # Service Worker，负责记录下载历史
-│   ├── popup/               # 弹窗界面与交互逻辑
-│   ├── types/               # 类型定义与第三方声明
-│   └── utils/               # 提取、导出、文件工具方法
-├── vite.config.ts           # Vite 多入口打包配置
-├── tsconfig.json            # TypeScript 配置
-├── package.json             # 依赖与脚本
-└── README.md
+
+## Local development
+
+```bash
+npm install
+npm run build
 ```
 
-## 本地开发与构建
-1. 安装依赖
-   ```bash
-   npm install
-   ```
-2. 开启开发调试（默认在 `dist/` 输出构建结果）
-   ```bash
-   npm run dev
-   ```
-3. 正式打包
-   ```bash
-   npm run build
-   ```
-4. 在 Chrome 中加载扩展：打开 `chrome://extensions`，启用开发者模式，选择“加载已解压的扩展程序”，指向 `dist/`。
+Then open `chrome://extensions`, enable Developer Mode, click `Load unpacked`, and select the `dist/` directory.
 
-> 提示：初次加载或更新后，若 Service Worker 尚未激活，可在扩展页寻找“背景页”并点击刷新唤醒。
+For a packaged build:
 
-## 使用指南
-1. 打开想保存的网页，点击扩展图标，弹窗会自动填入当前页链接并立即尝试提取正文。
-2. 若需处理其他页面，可粘贴链接并等待状态提示”提取完成”。
-3. 勾选想要导出的格式（可同时选择 Markdown、Word、PDF、TXT），扩展会记住上次的选择并默认勾选 Markdown。
-4. 点击”一键下载”，下载目录会生成 `YYYYMMDD-标题` 命名的各格式文件。
-5. 下方”下载记录”支持关键词搜索和一键清空，方便快速定位历史记录。
+```bash
+npm run package
+```
 
-### 💡 抓取 Twitter/X、知乎等需要登录的网站
+The generated zip will be written to `packages/`.
 
-对于需要登录或动态加载的网站（如 Twitter/X、知乎专栏等），请确保**目标页面已在浏览器中打开**，扩展会优先从已打开的标签页获取内容。
+## Permissions
 
-**示例：保存推文**
-1. 在浏览器中打开要保存的推文页面
-2. 等待页面完全加载（看到完整内容）
-3. 点击扩展图标，自动从当前标签页提取内容
-4. 选择格式并下载
+- `host_permissions: <all_urls>`: fetches article content from user-requested pages
+- `downloads`: saves exported files
+- `storage`: stores local history and user preferences
+- `tabs`: reads the current active tab URL for convenience
+- `scripting`: extracts content from the currently opened page, especially for logged-in or dynamic sites
 
-> 原理：扩展使用混合策略——优先从已打开的标签页获取（可绕过登录验证），失败时降级为跨域抓取。
+All processing happens locally in the extension. No article content is uploaded to a remote server by this project.
 
-## 关键技术细节
-- **正文解析**：基于 `@mozilla/readability`，结合自定义去广告规则与链接/图片绝对化处理。
-- **Markdown 转换**：采用 `turndown` 将提取后的 HTML 转换为 Markdown 结构。
-- **Word 导出**：输出兼容 Microsoft Word 的 `.doc` HTML 文档，保持标题和图片链接。
-- **PDF 生成**：基于 `pdf-lib` 动态排版正文，可嵌入远程图片。
-- **状态持久化**：`chrome.storage.local` 保存导出记录与导出偏好。
+## Known limitations
 
-## 权限说明
-- `host_permissions: <all_urls>`：用于跨域抓取用户输入的文章内容。
-- `downloads`：触发文档下载，无需额外交互。
-- `storage`：保存导出历史与下载偏好缓存。
-- `tabs`：读取当前活动页地址，自动填充链接。
-- `scripting`：从已打开的标签页获取页面内容，用于需要登录或动态加载的网站。
+- Some heavily scripted or anti-scraping pages may still fail
+- Logged-in sites should usually be opened in a tab before exporting
+- PDF export is intentionally lightweight and may not preserve complex layouts
 
-所有处理均在本地执行，扩展不会将用户数据上传至任何服务器。
+## Roadmap
 
-## 已知限制
-- 个别强脚本或懒加载页面可能阻止远程获取；请在浏览器中打开页面后重试（扩展会从标签页获取）。
-- 对于需要登录的网站（如 Twitter/X），请先在浏览器中打开并登录，确保页面完全加载后再使用扩展。
-- PDF 版式为轻量布局，适合阅读与存档，如需复杂排版建议使用 Word 导出后再调整。
-- docx 生成基于 HTML 转换，对极端样式的网页可能存在兼容性差异。
+- Batch export from multiple URLs
+- Better preview and cleanup before export
+- More localization and keyboard shortcuts
 
-## 下一步规划
-- 支持批量导入链接队列。
-- 增加国际化文案与快捷键。
-- 提供内容预览与手动清理能力。
+## Contributing
 
-欢迎根据业务需求继续拓展或提出优化建议。
+Issues and pull requests are welcome. If you report a bug, include the target site, expected result, actual result, and which export format you used.
+
+## License
+
+MIT

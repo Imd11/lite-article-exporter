@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 
-import { createReadStream, createWriteStream, promises as fs } from 'fs';
-import { pipeline } from 'stream/promises';
+import { createWriteStream, promises as fs } from 'fs';
 import archiver from 'archiver';
 import path from 'path';
 
 const projectRoot = process.cwd();
 const distDir = path.join(projectRoot, 'dist');
 const packageDir = path.join(projectRoot, 'packages');
-const packageName = 'lite-article-exporter-v1.0.0.zip';
+
+async function getPackageName() {
+  const packageJsonPath = path.join(projectRoot, 'package.json');
+  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+  return `lite-article-exporter-${packageJson.version}.zip`;
+}
 
 async function createPackage() {
   try {
+    const packageName = await getPackageName();
+
     // 确保 packages 目录存在
     await fs.mkdir(packageDir, { recursive: true });
     
