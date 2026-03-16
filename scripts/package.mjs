@@ -7,11 +7,13 @@ import path from 'path';
 const projectRoot = process.cwd();
 const distDir = path.join(projectRoot, 'dist');
 const packageDir = path.join(projectRoot, 'packages');
+const target = process.argv[2] === 'edge' ? 'edge' : 'chrome';
 
 async function getPackageName() {
   const packageJsonPath = path.join(projectRoot, 'package.json');
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
-  return `lite-article-exporter-${packageJson.version}.zip`;
+  const suffix = target === 'edge' ? '-edge' : '';
+  return `lite-article-exporter-${packageJson.version}${suffix}.zip`;
 }
 
 async function createPackage() {

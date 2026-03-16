@@ -8,7 +8,9 @@
     "build": "vite build && node scripts/postbuild.mjs",
     "package": "npm run build && node scripts/package.mjs",
     "lint": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package:chrome": "npm run build && node scripts/package.mjs",
+    "package:edge": "npm run build && node scripts/package.mjs edge"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
