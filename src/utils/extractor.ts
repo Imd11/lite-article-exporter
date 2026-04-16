@@ -2085,10 +2085,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                   return false;
                 }
 
-                if (
-                  other.role !== candidate.role &&
-                  other.text.length >= Math.min(160, candidate.text.length * 0.18)
-                ) {
+                if (other.role !== candidate.role && other.text.length >= 8) {
                   return true;
                 }
 
@@ -2110,7 +2107,14 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
             const merged: GrokTurn[] = [];
             for (const candidate of ordered) {
-              if (merged.some(turn => turn.element && (turn.element.contains(candidate.element) || candidate.element.contains(turn.element)))) {
+              if (
+                merged.some(
+                  turn =>
+                    turn.element &&
+                    turn.role === candidate.role &&
+                    (turn.element.contains(candidate.element) || candidate.element.contains(turn.element))
+                )
+              ) {
                 continue;
               }
 
@@ -2269,6 +2273,10 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             clone.querySelectorAll(
               "button, textarea, input, select, form, nav, aside, footer, canvas, svg, audio, video"
             ).forEach(node => node.remove());
+
+            clone
+              .querySelectorAll<HTMLImageElement>('img[src*="google.com/s2/favicons"], img[src*="www.google.com/s2/favicons"]')
+              .forEach(node => node.remove());
 
             clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach(node => {
               node.removeAttribute("contenteditable");
