@@ -1621,7 +1621,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
       const grokResults = await chrome.scripting.executeScript({
         target: { tabId },
         args: [t("grokRoleYouSaid"), t("grokRoleAssistantSaid"), t("grokConversationTitle")],
-        func: (userRoleLabel: string, assistantRoleLabel: string, fallbackConversationTitle: string) => {
+        func: async (userRoleLabel: string, assistantRoleLabel: string, fallbackConversationTitle: string) => {
           type ConversationRole = "user" | "assistant";
           type GrokTurn = {
             role: ConversationRole;
@@ -1896,6 +1896,41 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             }, 0);
 
             return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250 - auxiliaryPenalty - duplicatePenalty;
+          };
+
+          const chooseBestTurnArray = (runtimeTurns: GrokTurn[], domTurns: GrokTurn[]) => {
+            const candidates = [
+              { turns: runtimeTurns, score: scoreTurnArray(runtimeTurns) },
+              { turns: domTurns, score: scoreTurnArray(domTurns) }
+            ]
+              .filter(candidate => candidate.turns.length > 0)
+              .map(candidate => ({
+                ...candidate,
+                roleCount: new Set(candidate.turns.map(turn => turn.role)).size,
+                totalTextLength: candidate.turns.reduce((sum, turn) => sum + turn.text.length, 0)
+              }));
+
+            if (candidates.length === 0) {
+              return [];
+            }
+
+            const finiteCandidates = candidates.filter(candidate => Number.isFinite(candidate.score));
+            const pool = finiteCandidates.length > 0 ? finiteCandidates : candidates;
+
+            pool.sort((left, right) => {
+              if (Number.isFinite(left.score) && Number.isFinite(right.score) && left.score !== right.score) {
+                return right.score - left.score;
+              }
+              if (left.roleCount !== right.roleCount) {
+                return right.roleCount - left.roleCount;
+              }
+              if (left.totalTextLength !== right.totalTextLength) {
+                return right.totalTextLength - left.totalTextLength;
+              }
+              return right.turns.length - left.turns.length;
+            });
+
+            return pool[0]?.turns ?? [];
           };
 
           const extractRuntimeTurns = (): GrokTurn[] => {
@@ -2388,11 +2423,30 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             }
           };
 
-          const runtimeTurns = extractRuntimeTurns();
-          const domTurns = extractDomTurns();
-          const runtimeScore = scoreTurnArray(runtimeTurns);
-          const domScore = scoreTurnArray(domTurns);
-          const turns = Number.isFinite(runtimeScore) ? runtimeTurns : domScore > runtimeScore ? domTurns : runtimeTurns;
+          const hasCompleteConversation = (turns: GrokTurn[]) => {
+            return turns.length >= 2 && new Set(turns.map(turn => turn.role)).size === 2;
+          };
+
+          let runtimeTurns: GrokTurn[] = [];
+          let domTurns: GrokTurn[] = [];
+          let turns: GrokTurn[] = [];
+          const deadline = Date.now() + 8000;
+
+          do {
+            runtimeTurns = extractRuntimeTurns();
+            domTurns = extractDomTurns();
+            turns = chooseBestTurnArray(runtimeTurns, domTurns);
+
+            if (turns.length === 0) {
+              if (Date.now() >= deadline) {
+                break;
+              }
+            } else if (hasCompleteConversation(turns) || Date.now() >= deadline) {
+              break;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 250));
+          } while (Date.now() < deadline);
 
           if (turns.length === 0) {
             return null;
