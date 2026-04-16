@@ -1827,6 +1827,51 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             return imageCount >= 2 && linkCount <= imageCount + 2 && text.length <= 120 && /sources?/i.test(text);
           };
 
+          const countUrls = (text: string) => (text.match(/https?:\/\/\S+/gi) ?? []).length;
+
+          const looksLikePromptText = (text: string) => {
+            const normalized = normalizeText(text);
+            if (!normalized || isUiNoiseText(normalized) || isAuxiliaryTurnText(normalized)) {
+              return false;
+            }
+
+            const lineCount = normalized.split("\n").filter(Boolean).length;
+            const questionCount = (normalized.match(/[?？]/g) ?? []).length;
+            const urlCount = countUrls(normalized);
+            const hasPromptStart = /^(请你|请帮|帮我|写成|写一篇|根据|基于|估算|解释|分析|总结|翻译|改写|润色|列出|搜索|搜一下|查一下|为什么|怎么|如何|能否|可否|可以|所以|那|write\b|rewrite\b|summari[sz]e\b|translate\b|analy[sz]e\b|explain\b|estimate\b|help me\b|can you\b|could you\b|would you\b|why\b|what\b|how\b|please\b)/iu.test(
+              normalized
+            );
+            const hasPromptConstraint = /(禁止使用|使用.*风格|技术博客|微信公众号|根据以下|基于以下|给我|帮我|写成|整理成|估算一下|解释一下|总结一下|改写成|translate|rewrite|summari[sz]e|explain|estimate)/iu.test(
+              normalized
+            );
+            const hasPromptEnding = /[?？]\s*$/.test(normalized);
+
+            return (
+              lineCount <= 12 &&
+              (hasPromptEnding || questionCount > 0 || hasPromptStart || (urlCount > 0 && hasPromptConstraint))
+            );
+          };
+
+          const looksLikeAnswerText = (text: string, structuredCount = 0) => {
+            const normalized = normalizeText(text);
+            if (!normalized || isAuxiliaryTurnText(normalized)) {
+              return false;
+            }
+
+            const paragraphCount = normalized.split(/\n{2,}/).filter(Boolean).length;
+            const lineCount = normalized.split("\n").filter(Boolean).length;
+            const hasList = /(?:^|\n)\s*(?:[-*•]|\d+\.)\s+/m.test(normalized);
+            const hasTable = /\|.+\|/.test(normalized);
+
+            return (
+              structuredCount > 0 ||
+              hasList ||
+              hasTable ||
+              paragraphCount >= 2 ||
+              (lineCount >= 3 && normalized.length >= 220)
+            );
+          };
+
           const overlapsUsedElements = (element: HTMLElement, usedElements: Set<HTMLElement>) => {
             return Array.from(usedElements).some(used => used.contains(element) || element.contains(used));
           };
@@ -2027,8 +2072,48 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             const duplicatePenalty = turns.reduce((sum, turn, index) => {
               return sum + (turns.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) !== index ? 600 : 0);
             }, 0);
+            const roleMismatchPenalty = turns.reduce((sum, turn) => {
+              const promptLike = looksLikePromptText(turn.text);
+              const answerLike = looksLikeAnswerText(turn.text);
+              if (turn.role === "assistant" && promptLike && !answerLike) {
+                return sum + 2400;
+              }
+              if (turn.role === "user" && answerLike && !promptLike) {
+                return sum + 1800;
+              }
+              return sum;
+            }, 0);
 
-            return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250 - auxiliaryPenalty - duplicatePenalty;
+            return (
+              turns.length * 400 +
+              Math.min(totalTextLength, 20000) +
+              roleTransitions * 250 -
+              auxiliaryPenalty -
+              duplicatePenalty -
+              roleMismatchPenalty
+            );
+          };
+
+          const normalizeTurnSequence = (turns: GrokTurn[]) => {
+            const adjusted = turns.map(turn => ({ ...turn }));
+
+            for (const [index, turn] of adjusted.entries()) {
+              const promptLike = looksLikePromptText(turn.text);
+              const answerLike = looksLikeAnswerText(turn.text);
+              if (!(turn.role === "assistant" && promptLike && !answerLike)) {
+                continue;
+              }
+
+              const previousUsers = adjusted.slice(0, index).filter(candidate => candidate.role === "user").length;
+              const next = adjusted[index + 1];
+              if (index === 0 || previousUsers === 0 || (next && next.role === "assistant")) {
+                turn.role = "user";
+              }
+            }
+
+            return adjusted.filter(
+              (turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index
+            );
           };
 
           const chooseBestTurnArray = (runtimeTurns: GrokTurn[], domTurns: GrokTurn[]) => {
@@ -2048,7 +2133,11 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             }
 
             const finiteCandidates = candidates.filter(candidate => Number.isFinite(candidate.score));
-            const pool = finiteCandidates.length > 0 ? finiteCandidates : candidates;
+            if (finiteCandidates.length === 0) {
+              return [];
+            }
+
+            const pool = finiteCandidates;
 
             pool.sort((left, right) => {
               if (Number.isFinite(left.score) && Number.isFinite(right.score) && left.score !== right.score) {
@@ -2151,19 +2240,22 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               }
             }
 
-            return bestTurns
+            return normalizeTurnSequence(
+              bestTurns
               .sort((left, right) => {
                 if (left.timestamp != null && right.timestamp != null && left.timestamp !== right.timestamp) {
                   return left.timestamp - right.timestamp;
                 }
                 return left.order - right.order;
               })
-              .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index);
+              .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index)
+            );
           };
 
           const extractDomTurns = (): GrokTurn[] => {
             const scope = document.querySelector("main") ?? document.body;
-            const viewportWidth = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+            const scopeRect = scope.getBoundingClientRect();
+            const scopeWidth = Math.max(scopeRect.width, 1);
             const containerSelectors = "article, section, div";
             const rawCandidates = Array.from(scope.querySelectorAll<HTMLElement>(containerSelectors));
 
@@ -2184,9 +2276,42 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 }
 
                 const structuredCount = element.querySelectorAll("p, pre, ul, ol, li, table, blockquote, img").length;
-                const isUserLike = rect.left > viewportWidth * 0.45 && rect.width < viewportWidth * 0.5 && text.length <= 1200;
-                const isAssistantLike = rect.left < viewportWidth * 0.65 && (structuredCount > 0 || rect.width > viewportWidth * 0.25);
-                const role = isUserLike ? "user" : isAssistantLike ? "assistant" : null;
+                const promptLike = looksLikePromptText(text);
+                const answerLike = looksLikeAnswerText(text, structuredCount);
+                const leftOffset = rect.left - scopeRect.left;
+                const rightOffset = scopeRect.right - rect.right;
+                const widthRatio = rect.width / scopeWidth;
+
+                let userScore = 0;
+                let assistantScore = 0;
+
+                if (promptLike) {
+                  userScore += 5;
+                }
+                if (answerLike) {
+                  assistantScore += 4;
+                }
+                if (rightOffset < leftOffset) {
+                  userScore += 3;
+                }
+                if (leftOffset < rightOffset) {
+                  assistantScore += 2;
+                }
+                if (widthRatio <= 0.78) {
+                  userScore += 1;
+                }
+                if (widthRatio >= 0.36) {
+                  assistantScore += 1;
+                }
+                if (structuredCount > 0) {
+                  assistantScore += 2;
+                }
+                if (countUrls(text) > 0 && promptLike) {
+                  userScore += 1;
+                }
+
+                const role =
+                  userScore >= assistantScore + 2 ? "user" : assistantScore >= userScore + 2 ? "assistant" : null;
 
                 if (!role) {
                   return null;
@@ -2271,7 +2396,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               });
             }
 
-            return merged;
+            return normalizeTurnSequence(merged);
           };
 
           const buildSnippets = (text: string) => {
@@ -2589,7 +2714,9 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             await new Promise(resolve => setTimeout(resolve, 250));
           } while (Date.now() < deadline);
 
-          if (turns.length === 0) {
+          turns = normalizeTurnSequence(turns);
+
+          if (turns.length === 0 || !hasCompleteConversation(turns)) {
             return null;
           }
 
