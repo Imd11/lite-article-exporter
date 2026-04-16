@@ -362,6 +362,9 @@ button[type="submit"],
 }
 
 button[type="submit"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-height: 56px;
   padding: 15px 18px;
@@ -370,6 +373,9 @@ button[type="submit"] {
   color: var(--primary-text);
   font-size: 15px;
   font-weight: 750;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
   letter-spacing: -0.01em;
   cursor: pointer;
   box-shadow:
@@ -384,13 +390,13 @@ button[type="submit"]:hover:not(:disabled) {
 
 button[type="submit"]:disabled {
   cursor: not-allowed;
-  color: rgba(82, 67, 53, 0.52);
-  border-color: rgba(89, 73, 57, 0.08);
+  color: rgba(74, 59, 46, 0.82);
+  border-color: rgba(89, 73, 57, 0.12);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.44)),
-    rgba(255, 255, 255, 0.24);
+    linear-gradient(180deg, rgba(248, 242, 233, 0.96), rgba(237, 228, 216, 0.82)),
+    rgba(255, 255, 255, 0.18);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 10px 18px rgba(36, 28, 20, 0.06);
 }
 
