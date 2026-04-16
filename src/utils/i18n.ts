@@ -1,3 +1,5 @@
+import type { ExportFormat } from "../types/index";
+
 /**
  * 国际化 (i18n) 工具模块
  * 使用 Chrome 扩展的 i18n API
@@ -56,6 +58,22 @@ export interface I18nKey {
   metaSource: string;
   metaWords: string;
   metaImages: string;
+  articleMetaAuthorLine: string;
+  articleMetaSourceLine: string;
+  articleStatsLine: string;
+  historyFormatValue: string;
+  exportAuthorLine: string;
+  exportImageUnavailable: string;
+  exportImageCaption: string;
+  chatConversationTitle: string;
+  chatSharedConversationTitle: string;
+  geminiConversationTitle: string;
+  chatRoleUser: string;
+  chatRoleAssistant: string;
+  chatGptRoleYouSaid: string;
+  chatGptRoleAssistantSaid: string;
+  geminiRoleYouSaid: string;
+  geminiRoleAssistantSaid: string;
 
   // 其他
   defaultTitle: string;
@@ -68,8 +86,8 @@ export type TranslationKey = keyof I18nKey;
  * @param key 翻译键
  * @returns 翻译后的文本
  */
-export function t(key: TranslationKey): string {
-  return chrome.i18n.getMessage(key);
+export function t(key: TranslationKey, substitutions?: string | string[]): string {
+  return chrome.i18n.getMessage(key, substitutions);
 }
 
 /**
@@ -95,23 +113,38 @@ export function getFormatOptions() {
   return [
     {
       value: "markdown" as const,
-      label: t("formatMarkdown"),
+      label: getFormatLabel("markdown"),
       icon: "📝"
     },
     {
       value: "word" as const,
-      label: t("formatWord"),
+      label: getFormatLabel("word"),
       icon: "📄"
     },
     {
       value: "pdf" as const,
-      label: t("formatPdf"),
+      label: getFormatLabel("pdf"),
       icon: "📕"
     },
     {
       value: "text" as const,
-      label: t("formatText"),
+      label: getFormatLabel("text"),
       icon: "📃"
     }
   ];
+}
+
+export function getFormatLabel(format: ExportFormat): string {
+  switch (format) {
+    case "markdown":
+      return t("formatMarkdown");
+    case "word":
+      return t("formatWord");
+    case "pdf":
+      return t("formatPdf");
+    case "text":
+      return t("formatText");
+    default:
+      return format;
+  }
 }

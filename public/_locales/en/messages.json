@@ -159,6 +159,36 @@
     "message": "images",
     "description": "Image count label"
   },
+  "articleMetaAuthorLine": {
+    "message": "Author: $author$",
+    "description": "Author line in article preview",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      }
+    }
+  },
+  "articleMetaSourceLine": {
+    "message": "Source: $source$",
+    "description": "Source line in article preview",
+    "placeholders": {
+      "source": {
+        "content": "$1"
+      }
+    }
+  },
+  "articleStatsLine": {
+    "message": "Approx. $words$ words · $images$ images",
+    "description": "Article stats line in preview",
+    "placeholders": {
+      "words": {
+        "content": "$1"
+      },
+      "images": {
+        "content": "$2"
+      }
+    }
+  },
   "historyStatusSuccess": {
     "message": "Completed",
     "description": "Success status in history"
@@ -170,6 +200,81 @@
   "historyFormatLabel": {
     "message": "Format",
     "description": "Format label in history"
+  },
+  "historyFormatValue": {
+    "message": "Format: $formats$",
+    "description": "Localized format line in history",
+    "placeholders": {
+      "formats": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportAuthorLine": {
+    "message": "Author: $author$",
+    "description": "Author line in exported documents",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportImageUnavailable": {
+    "message": "[Image unavailable: $label$]",
+    "description": "Placeholder when an image cannot be embedded",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportImageCaption": {
+    "message": "Image $index$: $label$",
+    "description": "Image caption in exported PDF",
+    "placeholders": {
+      "index": {
+        "content": "$1"
+      },
+      "label": {
+        "content": "$2"
+      }
+    }
+  },
+  "chatConversationTitle": {
+    "message": "ChatGPT Conversation",
+    "description": "Fallback title for a ChatGPT conversation"
+  },
+  "chatSharedConversationTitle": {
+    "message": "ChatGPT Shared Conversation",
+    "description": "Fallback title for a shared ChatGPT conversation"
+  },
+  "geminiConversationTitle": {
+    "message": "Gemini Conversation",
+    "description": "Fallback title for a Gemini conversation"
+  },
+  "chatRoleUser": {
+    "message": "User",
+    "description": "User role heading in exported ChatGPT conversations"
+  },
+  "chatRoleAssistant": {
+    "message": "Assistant",
+    "description": "Assistant role heading in exported ChatGPT conversations"
+  },
+  "chatGptRoleYouSaid": {
+    "message": "You said",
+    "description": "User section heading in exported ChatGPT conversations"
+  },
+  "chatGptRoleAssistantSaid": {
+    "message": "ChatGPT said",
+    "description": "Assistant section heading in exported ChatGPT conversations"
+  },
+  "geminiRoleYouSaid": {
+    "message": "You said",
+    "description": "User section heading in exported Gemini conversations"
+  },
+  "geminiRoleAssistantSaid": {
+    "message": "Gemini said",
+    "description": "Assistant section heading in exported Gemini conversations"
   },
   "defaultTitle": {
     "message": "Untitled Article",

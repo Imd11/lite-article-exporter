@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import type { ReadabilityResult } from "@mozilla/readability";
 import TurndownService from "turndown";
 import type { ArticleData, ImageAsset } from "../types/index";
+import { t } from "./i18n";
 
 type SerializedSubstackRuntimeArticle = {
   title?: string;
@@ -12,6 +13,13 @@ type SerializedSubstackRuntimeArticle = {
 };
 
 type SerializedChatGptConversation = {
+  title?: string;
+  excerpt?: string | null;
+  bodyHtml: string;
+  language?: string | null;
+};
+
+type SerializedGeminiConversation = {
   title?: string;
   excerpt?: string | null;
   bodyHtml: string;
@@ -517,7 +525,7 @@ function extractSubstackArticleFromPreloads(
   const title =
     ("title" in post && typeof post.title === "string" ? post.title : null) ||
     documentRef.title ||
-    "未命名文章";
+    t("defaultTitle");
 
   const excerpt =
     ("subtitle" in post && typeof post.subtitle === "string" ? post.subtitle : null) ||
@@ -555,7 +563,7 @@ function buildSubstackArticleFromSerializedPayload(
 
   return {
     url: articleUrl,
-    title: payload.title?.trim() || documentRef.title || "未命名文章",
+    title: payload.title?.trim() || documentRef.title || t("defaultTitle"),
     byline: payload.byline,
     excerpt: payload.excerpt ?? undefined,
     contentHtml: tempContainer.innerHTML,
@@ -581,13 +589,40 @@ function buildChatGptConversationFromSerializedPayload(
   }
 
   const fallbackTitle = sourceUrl.includes("/share/")
-    ? "ChatGPT Shared Conversation"
-    : "ChatGPT Conversation";
+    ? t("chatSharedConversationTitle")
+    : t("chatConversationTitle");
 
   return {
     url: sourceUrl,
     title: payload.title?.trim() || documentRef.title || fallbackTitle,
     byline: "ChatGPT",
+    excerpt: payload.excerpt ?? undefined,
+    contentHtml: tempContainer.innerHTML,
+    textContent,
+    images: dedupeImages(images),
+    language: payload.language || documentRef.documentElement.lang || undefined
+  };
+}
+
+function buildGeminiConversationFromSerializedPayload(
+  documentRef: Document,
+  sourceUrl: string,
+  payload: SerializedGeminiConversation
+): Omit<ArticleData, "fetchedAt"> | null {
+  const tempContainer = documentRef.createElement("div");
+  tempContainer.innerHTML = payload.bodyHtml;
+  tempContainer.querySelectorAll("script, style, noscript").forEach(node => node.remove());
+
+  const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
+  const textContent = tempContainer.textContent?.trim() ?? "";
+  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+    return null;
+  }
+
+  return {
+    url: sourceUrl,
+    title: payload.title?.trim() || documentRef.title || t("geminiConversationTitle"),
+    byline: "Gemini",
     excerpt: payload.excerpt ?? undefined,
     contentHtml: tempContainer.innerHTML,
     textContent,
@@ -636,6 +671,19 @@ function isChatGptConversationUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return isChatGptHost(parsed.hostname) && (parsed.pathname.startsWith("/c/") || parsed.pathname.startsWith("/share/"));
+  } catch {
+    return false;
+  }
+}
+
+function isGeminiHost(hostname: string): boolean {
+  return hostname === "gemini.google.com";
+}
+
+function isGeminiConversationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isGeminiHost(parsed.hostname) && parsed.pathname.startsWith("/app/");
   } catch {
     return false;
   }
@@ -1012,7 +1060,18 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
     if (isChatGptConversationUrl(url)) {
       const chatResults = await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => {
+        args: [
+          t("chatGptRoleYouSaid"),
+          t("chatGptRoleAssistantSaid"),
+          t("chatConversationTitle"),
+          t("chatSharedConversationTitle")
+        ],
+        func: (
+          userRoleLabel: string,
+          assistantRoleLabel: string,
+          conversationTitle: string,
+          sharedConversationTitle: string
+        ) => {
           const normalizeText = (value: string | null | undefined) =>
             (value ?? "").replace(/\r\n?/g, "\n").replace(/\u00A0/g, " ").trim();
 
@@ -1178,8 +1237,8 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             const section = document.createElement("section");
             section.setAttribute("data-chatgpt-role", role);
 
-            const heading = document.createElement("h2");
-            heading.textContent = role === "user" ? "User" : "Assistant";
+            const heading = document.createElement("h1");
+            heading.textContent = role === "user" ? userRoleLabel : assistantRoleLabel;
             section.appendChild(heading);
 
             if (clone.childNodes.length > 0) {
@@ -1197,7 +1256,10 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             .replace(/\s*[-|]\s*ChatGPT\s*$/i, "")
             .trim();
 
-          const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : "ChatGPT Conversation";
+          const defaultConversationTitle = location.pathname.startsWith("/share/")
+            ? sharedConversationTitle
+            : conversationTitle;
+          const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : defaultConversationTitle;
           const excerptSource = firstAssistantText || firstUserText;
 
           return {
@@ -1217,6 +1279,293 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           console.log(`从 ChatGPT 标签页提取正文：${chatArticle.images.length} 张图片，${chatArticle.textContent.length} 字符`);
           return {
             ...chatArticle,
+            fetchedAt: Date.now()
+          };
+        }
+      }
+    }
+
+    if (isGeminiConversationUrl(url)) {
+      const geminiResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        args: [t("geminiRoleYouSaid"), t("geminiRoleAssistantSaid"), t("geminiConversationTitle")],
+        func: (userRoleLabel: string, assistantRoleLabel: string, fallbackConversationTitle: string) => {
+          type ConversationRole = "user" | "assistant";
+          type Marker = {
+            element: HTMLElement;
+            role: ConversationRole;
+            text: string;
+          };
+
+          const normalizeText = (value: string | null | undefined) =>
+            (value ?? "").replace(/\r\n?/g, "\n").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+
+          const isUserRoleText = (text: string) => /^你说$/i.test(text) || /^You said$/i.test(text);
+          const isAssistantRoleText = (text: string) => /^Gemini\s*说$/i.test(text) || /^Gemini said$/i.test(text);
+          const matchRole = (text: string): ConversationRole | null => {
+            if (isUserRoleText(text)) {
+              return "user";
+            }
+            if (isAssistantRoleText(text)) {
+              return "assistant";
+            }
+            return null;
+          };
+
+          const exactNoisePatterns = [
+            /^与 Gemini 对话$/i,
+            /^Chat with Gemini$/i,
+            /^Gemini$/i,
+            /^升级到 Google AI(?: Plus| Pro)?$/i,
+            /^Upgrade to Google AI(?: Plus| Pro)?$/i,
+            /^Google AI (?:Plus| Pro)$/i,
+            /^工具$/i,
+            /^Tools$/i,
+            /^Pro$/i
+          ];
+          const blockNoisePatterns = [
+            /Gemini 是一款 AI 工具/i,
+            /Gemini is an AI tool/i,
+            /你的隐私权与 Gemini/i,
+            /Your privacy & Gemini/i,
+            /opens in a new window/i
+          ];
+
+          const isNoiseText = (text: string) =>
+            exactNoisePatterns.some(pattern => pattern.test(text)) || blockNoisePatterns.some(pattern => pattern.test(text));
+
+          const collectRoleMarkers = (): Marker[] => {
+            const scope = document.querySelector("main") ?? document.body;
+            const rawMarkers = Array.from(
+              scope.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6, p, span, div, strong, section")
+            )
+              .map(element => {
+                const text = normalizeText(element.textContent);
+                const role = matchRole(text);
+                if (!role) {
+                  return null;
+                }
+                if (element.closest("nav, aside, footer")) {
+                  return null;
+                }
+                return { element, role, text };
+              })
+              .filter((marker): marker is Marker => !!marker);
+
+            const deduped = rawMarkers.filter(candidate => {
+              return !rawMarkers.some(
+                other =>
+                  other !== candidate &&
+                  other.role === candidate.role &&
+                  candidate.element.contains(other.element) &&
+                  other.text === candidate.text
+              );
+            });
+
+            deduped.sort((left, right) => {
+              if (left.element === right.element) {
+                return 0;
+              }
+              return left.element.compareDocumentPosition(right.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+            });
+
+            return deduped;
+          };
+
+          const waitForMarkers = async () => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 8000) {
+              const markers = collectRoleMarkers();
+              if (markers.some(marker => marker.role === "user") && markers.some(marker => marker.role === "assistant")) {
+                return markers;
+              }
+              await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            return collectRoleMarkers();
+          };
+
+          const markerContainsOtherTurn = (container: HTMLElement, currentMarker: Marker, markers: Marker[]) =>
+            markers.some(marker => marker !== currentMarker && container.contains(marker.element));
+
+          const findTurnContainer = (marker: Marker, markers: Marker[]) => {
+            let candidate: HTMLElement | null = null;
+
+            for (let current: HTMLElement | null = marker.element; current && current !== document.body; current = current.parentElement) {
+              const text = normalizeText(current.innerText || current.textContent);
+              const hasStructuredContent = !!current.querySelector(
+                "p, pre, ul, ol, li, table, blockquote, img, h1, h2, h3, h4, h5, h6"
+              );
+              const containsOtherTurn = markerContainsOtherTurn(current, marker, markers);
+
+              if (!containsOtherTurn && (text.length >= marker.text.length + 20 || hasStructuredContent)) {
+                candidate = current;
+                continue;
+              }
+
+              if (containsOtherTurn && candidate) {
+                break;
+              }
+            }
+
+            return candidate ?? marker.element.parentElement ?? marker.element;
+          };
+
+          const sanitizeTurnClone = (source: HTMLElement) => {
+            const clone = source.cloneNode(true) as HTMLElement;
+
+            clone.querySelectorAll(
+              "button, textarea, input, select, form, nav, aside, footer, canvas, svg, audio, video"
+            ).forEach(node => node.remove());
+
+            clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach(node => {
+              node.removeAttribute("contenteditable");
+            });
+
+            clone.querySelectorAll<HTMLElement>("img").forEach(img => {
+              const alt = normalizeText(img.getAttribute("alt"));
+              const src = img.getAttribute("src") ?? "";
+              if (
+                /个人资料|头像|profile photo|profile picture|avatar/i.test(alt) ||
+                /googleusercontent\.com\/a\//i.test(src)
+              ) {
+                img.remove();
+              }
+            });
+
+            const allNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))];
+            for (const node of allNodes.reverse()) {
+              if (node.closest("pre, code")) {
+                continue;
+              }
+
+              const text = normalizeText(node.innerText || node.textContent);
+              if (!text) {
+                continue;
+              }
+
+              const isRoleHeading = isUserRoleText(text) || isAssistantRoleText(text);
+              const isExactNoise = exactNoisePatterns.some(pattern => pattern.test(text));
+              const isBlockNoise = text.length <= 260 && blockNoisePatterns.some(pattern => pattern.test(text));
+
+              if (isRoleHeading || isExactNoise || isBlockNoise) {
+                node.remove();
+              }
+            }
+
+            clone.querySelectorAll<HTMLElement>("a").forEach(link => {
+              if (isNoiseText(normalizeText(link.textContent)) && !link.querySelector("img")) {
+                link.remove();
+              }
+            });
+
+            clone.querySelectorAll<HTMLElement>("div, section, article, span, p, li").forEach(node => {
+              const text = normalizeText(node.innerText || node.textContent);
+              if (!text && !node.querySelector("img, pre, code, table, ul, ol, blockquote")) {
+                node.remove();
+              }
+            });
+
+            const hasStructuredContent = !!clone.querySelector(
+              "p, pre, ul, ol, li, table, blockquote, h1, h2, h3, h4, h5, h6, img"
+            );
+
+            if (!hasStructuredContent) {
+              const text = normalizeText(source.innerText || source.textContent);
+              clone.innerHTML = "";
+
+              const paragraphs = text
+                .split(/\n{2,}/)
+                .map(part => part.trim())
+                .filter(part => part && !isNoiseText(part) && !isUserRoleText(part) && !isAssistantRoleText(part));
+
+              for (const paragraphText of paragraphs) {
+                const paragraph = document.createElement("p");
+                paragraph.textContent = paragraphText;
+                clone.appendChild(paragraph);
+              }
+            }
+
+            return clone;
+          };
+
+          return waitForMarkers().then(markers => {
+            if (markers.length === 0) {
+              return null;
+            }
+
+            const article = document.createElement("article");
+            const seenTurnContainers = new Set<HTMLElement>();
+            let firstUserText = "";
+            let firstAssistantText = "";
+
+            for (const marker of markers) {
+              const container = findTurnContainer(marker, markers);
+              if (seenTurnContainers.has(container)) {
+                continue;
+              }
+              seenTurnContainers.add(container);
+
+              const clone = sanitizeTurnClone(container);
+              const text = normalizeText(clone.innerText || clone.textContent);
+              const hasImage = !!clone.querySelector("img");
+              if (!text && !hasImage) {
+                continue;
+              }
+
+              if (!firstUserText && marker.role === "user") {
+                firstUserText = text;
+              }
+              if (!firstAssistantText && marker.role === "assistant") {
+                firstAssistantText = text;
+              }
+
+              const section = document.createElement("section");
+              section.setAttribute("data-gemini-role", marker.role);
+
+              const heading = document.createElement("h1");
+              heading.textContent = marker.role === "user" ? userRoleLabel : assistantRoleLabel;
+              section.appendChild(heading);
+
+              if (clone.childNodes.length > 0) {
+                section.append(...Array.from(clone.childNodes));
+              } else if (text) {
+                const paragraph = document.createElement("p");
+                paragraph.textContent = text;
+                section.appendChild(paragraph);
+              }
+
+              article.appendChild(section);
+            }
+
+            if (!article.childNodes.length) {
+              return null;
+            }
+
+            const titleFromDocument = (document.title || "")
+              .replace(/\s*[-|]\s*Gemini\s*$/i, "")
+              .trim();
+
+            const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : fallbackConversationTitle;
+            const excerptSource = firstAssistantText || firstUserText;
+
+            return {
+              title: titleFromDocument || fallbackTitle,
+              excerpt: excerptSource ? excerptSource.slice(0, 220) : null,
+              bodyHtml: article.innerHTML,
+              language: document.documentElement.lang || navigator.language || null
+            };
+          });
+        }
+      });
+
+      const geminiPayload = geminiResults?.[0]?.result as SerializedGeminiConversation | null | undefined;
+      if (geminiPayload?.bodyHtml) {
+        const geminiDoc = new DOMParser().parseFromString("<!DOCTYPE html><html><head></head><body></body></html>", "text/html");
+        const geminiArticle = buildGeminiConversationFromSerializedPayload(geminiDoc, url, geminiPayload);
+        if (geminiArticle) {
+          console.log(`从 Gemini 标签页提取正文：${geminiArticle.images.length} 张图片，${geminiArticle.textContent.length} 字符`);
+          return {
+            ...geminiArticle,
             fetchedAt: Date.now()
           };
         }
@@ -1782,7 +2131,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
     return {
       url: preferredUrl,
-      title: doc.title || "未命名文章",
+      title: doc.title || t("defaultTitle"),
       byline: undefined,
       excerpt: undefined,
       contentHtml,
@@ -1885,6 +2234,7 @@ function isDynamicContentSite(url: string): boolean {
     'x.com',
     'chatgpt.com',
     'chat.openai.com',
+    'gemini.google.com',
     'linkedin.com',
     'indiehackers.com',
     'producthunt.com',
@@ -1921,7 +2271,7 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
 
 请先在浏览器中打开该页面，等待内容完全加载后，再点击扩展图标进行提取。
 
-支持动态加载的网站：Substack, Medium, Twitter/X, ChatGPT, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
+支持动态加载的网站：Substack, Medium, Twitter/X, ChatGPT, Gemini, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
     }
   }
 
@@ -2000,7 +2350,7 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
 
   return {
     url,
-    title: article.title?.trim() || doc.title || "未命名文章",
+    title: article.title?.trim() || doc.title || t("defaultTitle"),
     byline: article.byline ?? undefined,
     excerpt: article.excerpt ?? undefined,
     contentHtml,

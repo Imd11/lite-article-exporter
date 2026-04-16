@@ -2,7 +2,7 @@ import type { ArticleData, DownloadRecord, ExportFormat } from "../types/index";
 import { fetchArticle } from "../utils/extractor";
 import { buildExportPayloads } from "../utils/exporters";
 import { slugify, buildDocumentBaseName } from "../utils/files";
-import { t, getFormatOptions } from "../utils/i18n";
+import { t, getFormatOptions, getFormatLabel } from "../utils/i18n";
 
 interface State {
   article: ArticleData | null;
@@ -234,18 +234,7 @@ async function ensureArticle(url: string): Promise<ArticleData | null> {
     return article;
   } catch (error) {
     console.error(error);
-    let message = error instanceof Error ? error.message : t("statusExtractFailed");
-
-    // Enhanced error messages
-    if (message.includes("dynamic") || message.includes("Substack") || message.includes("Medium")) {
-      message = t("statusDynamicSite");
-    } else if (message.includes("browser") || message.includes("tab")) {
-      message = t("statusNoTabFound");
-    } else if (message.includes("too short") || message.includes("paywall")) {
-      message = t("statusContentTooShort");
-    }
-
-    setStatus(message, true);
+    setStatus(getLocalizedExtractErrorMessage(error), true);
     state.article = null;
     previewSection.hidden = true;
     return null;
@@ -291,7 +280,7 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
     await chrome.storage.local.set({ [STORAGE_KEYS.formatSelection]: selectedFormats });
   } catch (error) {
     console.error(error);
-    const message = error instanceof Error ? error.message : t("statusExportFailed");
+    const message = getLocalizedExportErrorMessage(error);
     setStatus(message, true);
     await sendMessage({
       type: "updateRecord",
@@ -315,13 +304,13 @@ function getSelectedFormats(): ExportFormat[] {
 function renderArticle(article: ArticleData) {
   articleTitleEl.textContent = article.title;
   const metaParts: string[] = [];
-  if (article.byline) metaParts.push(`${t("metaAuthor")}：${article.byline}`);
-  metaParts.push(`${t("metaSource")}：${new URL(article.url).hostname}`);
+  if (article.byline) metaParts.push(t("articleMetaAuthorLine", article.byline));
+  metaParts.push(t("articleMetaSourceLine", new URL(article.url).hostname));
   articleMetaEl.textContent = metaParts.join(" · ");
   articleExcerptEl.textContent = article.excerpt || article.textContent.slice(0, 120);
-  const wordCount = Math.round(article.textContent.length / 2);
-  const imageCount = article.images.length;
-  articleStatsEl.textContent = `${t("metaWords")}约 ${wordCount} ${t("metaWords")} · ${t("metaImages")} ${imageCount} ${t("metaImages")}`;
+  const wordCount = Math.round(article.textContent.length / 2).toLocaleString();
+  const imageCount = article.images.length.toLocaleString();
+  articleStatsEl.textContent = t("articleStatsLine", [wordCount, imageCount]);
   previewSection.hidden = false;
   updateExportButtonState();
 }
@@ -358,14 +347,15 @@ function renderHistory() {
   });
 
   if (!filtered.length) {
-    historyList.innerHTML = `<p class="status">${t("historyNoMatches")}</p>`;
+    const emptyMessage = state.history.length === 0 ? t("historyEmpty") : t("historyNoMatches");
+    historyList.innerHTML = `<p class="status">${emptyMessage}</p>`;
     return;
   }
 
   historyList.innerHTML = filtered
     .map(record => {
       const date = new Date(record.timestamp);
-      const formatText = record.formats.join(" · ");
+      const formatText = record.formats.map(getFormatLabel).join(" · ");
       const statusText = record.status === "success" ? t("historyStatusSuccess") : t("historyStatusError");
       const statusClass = record.status === "success" ? "" : "status error";
       const safeTitle = escapeHtmlInline(record.title);
@@ -376,7 +366,7 @@ function renderHistory() {
         <div class="history-item">
           <strong>${safeTitle}</strong>
           <span>${date.toLocaleString()}</span>
-          <span>${t("historyFormatLabel")}：${formatText}</span>
+          <span>${t("historyFormatValue", formatText)}</span>
           <span class="${statusClass}">${statusText}${errorText}</span>
           <span class="history-link">${link}</span>
         </div>
@@ -388,6 +378,58 @@ function renderHistory() {
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle("error", isError);
+}
+
+function getLocalizedExtractErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return t("statusExtractFailed");
+  }
+
+  const raw = error.message;
+  const normalized = raw.toLowerCase();
+
+  if (
+    normalized.includes("dynamic") ||
+    normalized.includes("substack") ||
+    normalized.includes("medium") ||
+    normalized.includes("chatgpt") ||
+    raw.includes("动态加载")
+  ) {
+    return t("statusDynamicSite");
+  }
+
+  if (
+    normalized.includes("browser") ||
+    normalized.includes("tab") ||
+    raw.includes("标签页") ||
+    raw.includes("浏览器") ||
+    raw.includes("从标签页获取失败")
+  ) {
+    return t("statusNoTabFound");
+  }
+
+  if (
+    normalized.includes("too short") ||
+    normalized.includes("paywall") ||
+    raw.includes("内容过短")
+  ) {
+    return t("statusContentTooShort");
+  }
+
+  return t("statusExtractFailed");
+}
+
+function getLocalizedExportErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return t("statusExportFailed");
+  }
+
+  const normalized = error.message.toLowerCase();
+  if (normalized.includes("download") || normalized.includes("blob") || normalized.includes("failed")) {
+    return t("statusExportFailed");
+  }
+
+  return t("statusExportFailed");
 }
 
 function setLoading(loading: boolean) {

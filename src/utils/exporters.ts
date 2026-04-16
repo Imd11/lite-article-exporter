@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, convertInchesToTwip, ImageRun } from "docx";
 import type { ArticleData, ExportFormat } from "../types/index";
 import { articleToMarkdown, articleToPlainText } from "./extractor";
+import { t } from "./i18n";
 
 interface ExportPayload {
   format: ExportFormat;
@@ -203,7 +204,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
       new Paragraph({
         children: [
           new TextRun({
-            text: `作者：${article.byline}`,
+            text: t("exportAuthorLine", article.byline),
             italics: true,
             size: 22, // 11pt
             font: DOCX_FONT_FAMILY,
@@ -400,7 +401,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
               new Paragraph({
                 children: [
                   new TextRun({
-                    text: `[图片无法加载: ${imgElement.alt || imgSrc}]`,
+                    text: t("exportImageUnavailable", imgElement.alt || imgSrc),
                     italics: true,
                     size: 22, // 11pt
                     font: DOCX_FONT_FAMILY,
@@ -637,7 +638,7 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
       cursorY -= drawHeight + 12;
 
       if (image.alt) {
-        drawText(`图 ${index + 1}: ${image.alt}`, {
+        drawText(t("exportImageCaption", [String(index + 1), image.alt]), {
           fontSize: 11,
           lineHeight: 1.3
         });

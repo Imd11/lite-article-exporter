@@ -159,6 +159,36 @@
     "message": "张",
     "description": "图片标签"
   },
+  "articleMetaAuthorLine": {
+    "message": "作者：$author$",
+    "description": "文章预览中的作者行",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      }
+    }
+  },
+  "articleMetaSourceLine": {
+    "message": "来源：$source$",
+    "description": "文章预览中的来源行",
+    "placeholders": {
+      "source": {
+        "content": "$1"
+      }
+    }
+  },
+  "articleStatsLine": {
+    "message": "约 $words$ 字 · $images$ 张图片",
+    "description": "文章预览中的统计信息",
+    "placeholders": {
+      "words": {
+        "content": "$1"
+      },
+      "images": {
+        "content": "$2"
+      }
+    }
+  },
   "historyStatusSuccess": {
     "message": "已完成",
     "description": "成功状态（历史记录）"
@@ -170,6 +200,81 @@
   "historyFormatLabel": {
     "message": "格式",
     "description": "格式标签（历史记录）"
+  },
+  "historyFormatValue": {
+    "message": "格式：$formats$",
+    "description": "历史记录中的格式行",
+    "placeholders": {
+      "formats": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportAuthorLine": {
+    "message": "作者：$author$",
+    "description": "导出文档中的作者行",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportImageUnavailable": {
+    "message": "[图片无法加载：$label$]",
+    "description": "图片无法嵌入时的占位文案",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "exportImageCaption": {
+    "message": "图 $index$：$label$",
+    "description": "导出 PDF 中的图片说明",
+    "placeholders": {
+      "index": {
+        "content": "$1"
+      },
+      "label": {
+        "content": "$2"
+      }
+    }
+  },
+  "chatConversationTitle": {
+    "message": "ChatGPT 对话",
+    "description": "ChatGPT 对话的兜底标题"
+  },
+  "chatSharedConversationTitle": {
+    "message": "ChatGPT 共享对话",
+    "description": "ChatGPT 共享对话的兜底标题"
+  },
+  "geminiConversationTitle": {
+    "message": "Gemini 对话",
+    "description": "Gemini 对话的兜底标题"
+  },
+  "chatRoleUser": {
+    "message": "用户",
+    "description": "导出 ChatGPT 对话中的用户标题"
+  },
+  "chatRoleAssistant": {
+    "message": "助手",
+    "description": "导出 ChatGPT 对话中的助手标题"
+  },
+  "chatGptRoleYouSaid": {
+    "message": "You said",
+    "description": "导出 ChatGPT 对话中的用户段落标题"
+  },
+  "chatGptRoleAssistantSaid": {
+    "message": "ChatGPT said",
+    "description": "导出 ChatGPT 对话中的助手段落标题"
+  },
+  "geminiRoleYouSaid": {
+    "message": "You said",
+    "description": "导出 Gemini 对话中的用户段落标题"
+  },
+  "geminiRoleAssistantSaid": {
+    "message": "Gemini said",
+    "description": "导出 Gemini 对话中的助手段落标题"
   },
   "defaultTitle": {
     "message": "未命名文章",
