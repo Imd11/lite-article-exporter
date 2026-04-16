@@ -104,7 +104,7 @@ turndown.addRule("tables", {
     const separator = Array(columnCount).fill("---");
     const lines: string[] = [];
 
-    if (firstRowHasHeaders) {
+    if (firstRowHasHeaders || rows.length > 1) {
       lines.push("| " + rows[0].join(" | ") + " |");
       lines.push("| " + separator.join(" | ") + " |");
       for (const row of rows.slice(1)) {
@@ -112,9 +112,7 @@ turndown.addRule("tables", {
       }
     } else {
       lines.push("| " + separator.join(" | ") + " |");
-      for (const row of rows) {
-        lines.push("| " + row.join(" | ") + " |");
-      }
+      lines.push("| " + rows[0].join(" | ") + " |");
     }
 
     return "\n\n" + lines.join("\n") + "\n\n";
@@ -1665,6 +1663,41 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             ].some(pattern => pattern.test(text));
           };
 
+          const isAuxiliaryTurnText = (text: string) => {
+            const normalized = normalizeText(text);
+            if (!normalized) {
+              return true;
+            }
+
+            return [
+              /^思考了\s*\d+(?:\.\d+)?\s*(?:ms|s|m|h|秒|分钟|分|小时)?$/i,
+              /^thought\s+for\s+\d+(?:\.\d+)?\s*(?:ms|s|m|h|seconds?|minutes?|hours?)$/i,
+              /^searching(?:\s+the\s+web)?$/i,
+              /^搜索中$/i,
+              /^\d+\s+sources?$/i,
+              /^sources?$/i
+            ].some(pattern => pattern.test(normalized));
+          };
+
+          const isLikelySourcesBlock = (element: HTMLElement, rawText?: string) => {
+            const text = rawText ? normalizeText(rawText) : normalizeText(element.innerText || element.textContent);
+            if (!text) {
+              return false;
+            }
+
+            if (/^\d+\s+sources?$/i.test(text)) {
+              return true;
+            }
+
+            const imageCount = element.querySelectorAll("img").length;
+            const linkCount = element.querySelectorAll("a").length;
+            return imageCount >= 2 && linkCount <= imageCount + 2 && text.length <= 120 && /sources?/i.test(text);
+          };
+
+          const overlapsUsedElements = (element: HTMLElement, usedElements: Set<HTMLElement>) => {
+            return Array.from(usedElements).some(used => used.contains(element) || element.contains(used));
+          };
+
           const normalizeRole = (value: unknown): ConversationRole | null => {
             if (typeof value !== "string") {
               return null;
@@ -1716,7 +1749,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
             if (typeof value === "string") {
               const normalized = normalizeText(value);
-              if (!normalized || isUiNoiseText(normalized)) {
+              if (!normalized || isUiNoiseText(normalized) || isAuxiliaryTurnText(normalized)) {
                 return [];
               }
               return [normalized];
@@ -1834,7 +1867,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               .sort((left, right) => right.length - left.length);
 
             const text = textCandidates[0];
-            if (!text) {
+            if (!text || isAuxiliaryTurnText(text)) {
               return null;
             }
 
@@ -1857,8 +1890,12 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             const roleTransitions = turns.slice(1).reduce((sum, turn, index) => {
               return sum + (turn.role !== turns[index].role ? 1 : 0);
             }, 0);
+            const auxiliaryPenalty = turns.reduce((sum, turn) => sum + (isAuxiliaryTurnText(turn.text) ? 900 : 0), 0);
+            const duplicatePenalty = turns.reduce((sum, turn, index) => {
+              return sum + (turns.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) !== index ? 600 : 0);
+            }, 0);
 
-            return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250;
+            return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250 - auxiliaryPenalty - duplicatePenalty;
           };
 
           const extractRuntimeTurns = (): GrokTurn[] => {
@@ -1974,7 +2011,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 }
 
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!text || isUiNoiseText(text)) {
+                if (!text || isUiNoiseText(text) || isAuxiliaryTurnText(text) || isLikelySourcesBlock(element, text)) {
                   return null;
                 }
 
@@ -2005,11 +2042,22 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
             const minimalCandidates = candidates.filter(candidate => {
               return !candidates.some(other => {
-                if (other === candidate || other.role !== candidate.role) {
+                if (other === candidate) {
                   return false;
                 }
 
                 if (!candidate.element.contains(other.element)) {
+                  return false;
+                }
+
+                if (
+                  other.role !== candidate.role &&
+                  other.text.length >= Math.min(160, candidate.text.length * 0.18)
+                ) {
+                  return true;
+                }
+
+                if (other.role !== candidate.role) {
                   return false;
                 }
 
@@ -2018,13 +2066,19 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             });
 
             const ordered = minimalCandidates
-              .sort((left, right) => (left.top !== right.top ? left.top - right.top : left.order - right.order))
+              .sort((left, right) =>
+                left.top !== right.top ? left.top - right.top : left.text.length !== right.text.length ? left.text.length - right.text.length : left.order - right.order
+              )
               .filter((candidate, index, list) => {
                 return list.findIndex(other => other.role === candidate.role && other.text === candidate.text) === index;
               });
 
             const merged: GrokTurn[] = [];
             for (const candidate of ordered) {
+              if (merged.some(turn => turn.element && (turn.element.contains(candidate.element) || candidate.element.contains(turn.element)))) {
+                continue;
+              }
+
               const last = merged[merged.length - 1];
               if (
                 last &&
@@ -2083,11 +2137,12 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             return roots;
           };
 
-          const findElementForMessage = (messageText: string, usedElements: Set<HTMLElement>) => {
+          const findElementForMessage = (messageText: string, neighboringTexts: string[], usedElements: Set<HTMLElement>) => {
             const roots = collectRoots();
             const snippets = buildSnippets(messageText);
             const fallbackSnippet = normalizeText(messageText).slice(0, 120);
             const querySnippets = snippets.length > 0 ? snippets : (fallbackSnippet ? [fallbackSnippet] : []);
+            const neighboringSnippets = neighboringTexts.flatMap(text => buildSnippets(text).slice(0, 1));
             const candidates: Array<{ element: HTMLElement; score: number }> = [];
 
             if (querySnippets.length === 0) {
@@ -2100,7 +2155,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               );
 
               for (const element of elements) {
-                if (usedElements.has(element)) {
+                if (usedElements.has(element) || overlapsUsedElements(element, usedElements)) {
                   continue;
                 }
 
@@ -2114,7 +2169,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 }
 
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!text || text.length < 8) {
+                if (!text || text.length < 8 || isUiNoiseText(text) || isAuxiliaryTurnText(text) || isLikelySourcesBlock(element, text)) {
                   continue;
                 }
 
@@ -2123,13 +2178,20 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                   continue;
                 }
 
+                const neighboringMatches = neighboringSnippets.filter(snippet => text.includes(snippet));
+                if (neighboringMatches.length > 0 && text.length > messageText.length * 1.6) {
+                  continue;
+                }
+
                 const structuredBonus = element.querySelector("p, pre, ul, ol, li, table, blockquote, img") ? 220 : 0;
                 const closeness = Math.max(0, 800 - Math.abs(text.length - messageText.length));
                 const exactBonus = text === normalizeText(messageText) ? 400 : 0;
+                const overlapPenalty = neighboringMatches.length * 900;
+                const oversizePenalty = Math.max(0, text.length - messageText.length * 1.35) / 3;
 
                 candidates.push({
                   element,
-                  score: matchedSnippets.length * 1000 + structuredBonus + closeness + exactBonus
+                  score: matchedSnippets.length * 1000 + structuredBonus + closeness + exactBonus - overlapPenalty - oversizePenalty
                 });
               }
             }
@@ -2188,14 +2250,47 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 continue;
               }
 
-              if (text.length <= 40 && isUiNoiseText(text) && !node.querySelector("img")) {
+              if ((text.length <= 40 && isUiNoiseText(text) && !node.querySelector("img")) || isAuxiliaryTurnText(text) || isLikelySourcesBlock(node, text)) {
                 node.remove();
               }
             }
 
+            clone.querySelectorAll("table").forEach(table => {
+              const firstRow = table.querySelector("tr");
+              if (!firstRow || firstRow.querySelector("th")) {
+                return;
+              }
+
+              const cells = Array.from(firstRow.children).filter(
+                (child): child is HTMLTableCellElement => child instanceof HTMLTableCellElement
+              );
+              if (cells.length < 2) {
+                return;
+              }
+
+              const headerRow = document.createElement("tr");
+              for (const cell of cells) {
+                const th = document.createElement("th");
+                th.innerHTML = cell.innerHTML;
+                headerRow.appendChild(th);
+              }
+
+              let thead = table.querySelector("thead");
+              if (!thead) {
+                thead = document.createElement("thead");
+                table.prepend(thead);
+              }
+
+              thead.appendChild(headerRow);
+              firstRow.remove();
+            });
+
             clone.querySelectorAll<HTMLElement>("div, section, article, span, p, li").forEach(node => {
               const text = normalizeText(node.innerText || node.textContent);
-              if (!text && !node.querySelector("img, pre, code, table, ul, ol, blockquote")) {
+              if (
+                (!text || isAuxiliaryTurnText(text) || isLikelySourcesBlock(node, text)) &&
+                !node.querySelector("img, pre, code, table, ul, ol, blockquote")
+              ) {
                 node.remove();
               }
             });
@@ -2295,7 +2390,9 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
           const runtimeTurns = extractRuntimeTurns();
           const domTurns = extractDomTurns();
-          const turns = scoreTurnArray(domTurns) > scoreTurnArray(runtimeTurns) ? domTurns : runtimeTurns;
+          const runtimeScore = scoreTurnArray(runtimeTurns);
+          const domScore = scoreTurnArray(domTurns);
+          const turns = Number.isFinite(runtimeScore) ? runtimeTurns : domScore > runtimeScore ? domTurns : runtimeTurns;
 
           if (turns.length === 0) {
             return null;
@@ -2314,10 +2411,12 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               firstAssistantText = turn.text;
             }
 
-            const elementMatch = turn.element ?? findElementForMessage(turn.text, usedElements);
             const neighboringTexts = turns
               .filter((_candidate, candidateIndex) => candidateIndex !== index)
               .map(candidate => candidate.text);
+            const elementMatch = turn.element && !overlapsUsedElements(turn.element, usedElements)
+              ? turn.element
+              : findElementForMessage(turn.text, neighboringTexts, usedElements);
 
             const section = document.createElement("section");
             section.setAttribute("data-grok-role", turn.role);
