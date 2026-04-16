@@ -392,9 +392,11 @@ function renderHistory() {
         : "";
       return `
         <a class="history-item" href="${safeUrl}" target="_blank" rel="noreferrer">
-          <strong>${safeTitle}</strong>
+          <div class="history-item-top">
+            <strong>${safeTitle}</strong>
+            <span class="history-item-time">${safeDateLabel}</span>
+          </div>
           <p class="history-item-detail">${safeHost} · ${safeFormatText}</p>
-          <p class="history-item-time">${safeDateLabel}</p>
           ${errorText}
         </a>
       `;
