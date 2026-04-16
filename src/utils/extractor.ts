@@ -1625,11 +1625,13 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
         args: [t("grokRoleYouSaid"), t("grokRoleAssistantSaid"), t("grokConversationTitle")],
         func: (userRoleLabel: string, assistantRoleLabel: string, fallbackConversationTitle: string) => {
           type ConversationRole = "user" | "assistant";
-          type RuntimeTurn = {
+          type GrokTurn = {
             role: ConversationRole;
             text: string;
             order: number;
             timestamp?: number;
+            element?: HTMLElement;
+            top?: number;
           };
 
           const normalizeText = (value: string | null | undefined) =>
@@ -1817,7 +1819,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             return undefined;
           };
 
-          const extractCandidateTurn = (value: unknown, order: number): RuntimeTurn | null => {
+          const extractCandidateTurn = (value: unknown, order: number): GrokTurn | null => {
             if (!value || typeof value !== "object") {
               return null;
             }
@@ -1844,7 +1846,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             };
           };
 
-          const scoreTurnArray = (turns: RuntimeTurn[]) => {
+          const scoreTurnArray = (turns: GrokTurn[]) => {
             const userCount = turns.filter(turn => turn.role === "user").length;
             const assistantCount = turns.filter(turn => turn.role === "assistant").length;
             if (userCount === 0 || assistantCount === 0 || turns.length < 2) {
@@ -1859,7 +1861,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250;
           };
 
-          const extractRuntimeTurns = (): RuntimeTurn[] => {
+          const extractRuntimeTurns = (): GrokTurn[] => {
             const explicitRootNames = [
               "__NEXT_DATA__",
               "__INITIAL_STATE__",
@@ -1897,7 +1899,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
             const queue = roots.map(value => ({ value, depth: 0 }));
             const seen = new WeakSet<object>();
-            let bestTurns: RuntimeTurn[] = [];
+            let bestTurns: GrokTurn[] = [];
             let bestScore = Number.NEGATIVE_INFINITY;
             let visited = 0;
 
@@ -1922,7 +1924,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 const turns = value
                   .slice(0, 200)
                   .map((item, index) => extractCandidateTurn(item, index))
-                  .filter((turn): turn is RuntimeTurn => !!turn)
+                  .filter((turn): turn is GrokTurn => !!turn)
                   .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index);
 
                 const score = scoreTurnArray(turns);
@@ -1952,6 +1954,98 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 return left.order - right.order;
               })
               .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index);
+          };
+
+          const extractDomTurns = (): GrokTurn[] => {
+            const scope = document.querySelector("main") ?? document.body;
+            const viewportWidth = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+            const containerSelectors = "article, section, div";
+            const rawCandidates = Array.from(scope.querySelectorAll<HTMLElement>(containerSelectors));
+
+            const candidates = rawCandidates
+              .map((element, index) => {
+                if (element.closest("nav, aside, footer, form, button")) {
+                  return null;
+                }
+
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 120 || rect.height < 18) {
+                  return null;
+                }
+
+                const text = normalizeText(element.innerText || element.textContent);
+                if (!text || isUiNoiseText(text)) {
+                  return null;
+                }
+
+                const structuredCount = element.querySelectorAll("p, pre, ul, ol, li, table, blockquote, img").length;
+                const isUserLike = rect.left > viewportWidth * 0.45 && rect.width < viewportWidth * 0.5 && text.length <= 1200;
+                const isAssistantLike = rect.left < viewportWidth * 0.65 && (structuredCount > 0 || rect.width > viewportWidth * 0.25);
+                const role = isUserLike ? "user" : isAssistantLike ? "assistant" : null;
+
+                if (!role) {
+                  return null;
+                }
+
+                return {
+                  element,
+                  role,
+                  text,
+                  top: rect.top + window.scrollY,
+                  order: index,
+                  score: text.length + structuredCount * 180
+                };
+              })
+              .filter(
+                (
+                  candidate
+                ): candidate is { element: HTMLElement; role: ConversationRole; text: string; top: number; order: number; score: number } =>
+                  !!candidate
+              );
+
+            const minimalCandidates = candidates.filter(candidate => {
+              return !candidates.some(other => {
+                if (other === candidate || other.role !== candidate.role) {
+                  return false;
+                }
+
+                if (!candidate.element.contains(other.element)) {
+                  return false;
+                }
+
+                return other.text.length >= candidate.text.length * 0.65 && other.score >= candidate.score * 0.75;
+              });
+            });
+
+            const ordered = minimalCandidates
+              .sort((left, right) => (left.top !== right.top ? left.top - right.top : left.order - right.order))
+              .filter((candidate, index, list) => {
+                return list.findIndex(other => other.role === candidate.role && other.text === candidate.text) === index;
+              });
+
+            const merged: GrokTurn[] = [];
+            for (const candidate of ordered) {
+              const last = merged[merged.length - 1];
+              if (
+                last &&
+                last.role === candidate.role &&
+                last.element &&
+                last.top != null &&
+                candidate.top - last.top < 120
+              ) {
+                continue;
+              }
+
+              merged.push({
+                role: candidate.role,
+                text: candidate.text,
+                order: candidate.order,
+                top: candidate.top,
+                element: candidate.element
+              });
+            }
+
+            return merged;
           };
 
           const buildSnippets = (text: string) => {
@@ -2200,7 +2294,10 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           };
 
           const runtimeTurns = extractRuntimeTurns();
-          if (runtimeTurns.length === 0) {
+          const domTurns = extractDomTurns();
+          const turns = scoreTurnArray(domTurns) > scoreTurnArray(runtimeTurns) ? domTurns : runtimeTurns;
+
+          if (turns.length === 0) {
             return null;
           }
 
@@ -2209,7 +2306,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           let firstUserText = "";
           let firstAssistantText = "";
 
-          for (const [index, turn] of runtimeTurns.entries()) {
+          for (const [index, turn] of turns.entries()) {
             if (!firstUserText && turn.role === "user") {
               firstUserText = turn.text;
             }
@@ -2217,8 +2314,8 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               firstAssistantText = turn.text;
             }
 
-            const elementMatch = findElementForMessage(turn.text, usedElements);
-            const neighboringTexts = runtimeTurns
+            const elementMatch = turn.element ?? findElementForMessage(turn.text, usedElements);
+            const neighboringTexts = turns
               .filter((_candidate, candidateIndex) => candidateIndex !== index)
               .map(candidate => candidate.text);
 
