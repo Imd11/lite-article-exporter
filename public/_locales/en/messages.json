@@ -60,7 +60,7 @@
     "description": "Download button text"
   },
   "historyTitle": {
-    "message": "Download History",
+    "message": "History",
     "description": "History section title"
   },
   "historySearchPlaceholder": {
