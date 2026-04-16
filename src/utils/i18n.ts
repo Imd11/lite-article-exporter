@@ -68,12 +68,15 @@ export interface I18nKey {
   chatConversationTitle: string;
   chatSharedConversationTitle: string;
   geminiConversationTitle: string;
+  grokConversationTitle: string;
   chatRoleUser: string;
   chatRoleAssistant: string;
   chatGptRoleYouSaid: string;
   chatGptRoleAssistantSaid: string;
   geminiRoleYouSaid: string;
   geminiRoleAssistantSaid: string;
+  grokRoleYouSaid: string;
+  grokRoleAssistantSaid: string;
 
   // 其他
   defaultTitle: string;

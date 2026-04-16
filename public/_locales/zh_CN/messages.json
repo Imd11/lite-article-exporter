@@ -252,6 +252,10 @@
     "message": "Gemini 对话",
     "description": "Gemini 对话的兜底标题"
   },
+  "grokConversationTitle": {
+    "message": "Grok 对话",
+    "description": "Grok 对话的兜底标题"
+  },
   "chatRoleUser": {
     "message": "用户",
     "description": "导出 ChatGPT 对话中的用户标题"
@@ -275,6 +279,14 @@
   "geminiRoleAssistantSaid": {
     "message": "Gemini said",
     "description": "导出 Gemini 对话中的助手段落标题"
+  },
+  "grokRoleYouSaid": {
+    "message": "You said",
+    "description": "导出 Grok 对话中的用户段落标题"
+  },
+  "grokRoleAssistantSaid": {
+    "message": "Grok said",
+    "description": "导出 Grok 对话中的助手段落标题"
   },
   "defaultTitle": {
     "message": "未命名文章",

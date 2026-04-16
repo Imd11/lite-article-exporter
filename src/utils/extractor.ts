@@ -26,6 +26,13 @@ type SerializedGeminiConversation = {
   language?: string | null;
 };
 
+type SerializedGrokConversation = {
+  title?: string;
+  excerpt?: string | null;
+  bodyHtml: string;
+  language?: string | null;
+};
+
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
@@ -631,6 +638,33 @@ function buildGeminiConversationFromSerializedPayload(
   };
 }
 
+function buildGrokConversationFromSerializedPayload(
+  documentRef: Document,
+  sourceUrl: string,
+  payload: SerializedGrokConversation
+): Omit<ArticleData, "fetchedAt"> | null {
+  const tempContainer = documentRef.createElement("div");
+  tempContainer.innerHTML = payload.bodyHtml;
+  tempContainer.querySelectorAll("script, style, noscript").forEach(node => node.remove());
+
+  const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
+  const textContent = tempContainer.textContent?.trim() ?? "";
+  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+    return null;
+  }
+
+  return {
+    url: sourceUrl,
+    title: payload.title?.trim() || documentRef.title || t("grokConversationTitle"),
+    byline: "Grok",
+    excerpt: payload.excerpt ?? undefined,
+    contentHtml: tempContainer.innerHTML,
+    textContent,
+    images: dedupeImages(images),
+    language: payload.language || documentRef.documentElement.lang || undefined
+  };
+}
+
 function extractSubstackCanonicalUrl(documentRef: Document, sourceUrl: string): string | null {
   const preloads = extractSubstackPreloads(documentRef);
   if (preloads) {
@@ -684,6 +718,19 @@ function isGeminiConversationUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return isGeminiHost(parsed.hostname) && parsed.pathname.startsWith("/app/");
+  } catch {
+    return false;
+  }
+}
+
+function isGrokHost(hostname: string): boolean {
+  return hostname === "grok.com" || hostname === "www.grok.com";
+}
+
+function isGrokConversationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isGrokHost(parsed.hostname) && (parsed.pathname.startsWith("/c/") || parsed.pathname.startsWith("/share/"));
   } catch {
     return false;
   }
@@ -1572,6 +1619,667 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
       }
     }
 
+    if (isGrokConversationUrl(url)) {
+      const grokResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        args: [t("grokRoleYouSaid"), t("grokRoleAssistantSaid"), t("grokConversationTitle")],
+        func: (userRoleLabel: string, assistantRoleLabel: string, fallbackConversationTitle: string) => {
+          type ConversationRole = "user" | "assistant";
+          type RuntimeTurn = {
+            role: ConversationRole;
+            text: string;
+            order: number;
+            timestamp?: number;
+          };
+
+          const normalizeText = (value: string | null | undefined) =>
+            (value ?? "").replace(/\r\n?/g, "\n").replace(/\u00A0/g, " ").replace(/[ \t]+/g, " ").trim();
+
+          const unique = <T,>(items: T[]) => Array.from(new Set(items));
+
+          const isUiNoiseText = (text: string) => {
+            if (!text) {
+              return true;
+            }
+
+            return [
+              /^分享$/i,
+              /^share$/i,
+              /^编辑$/i,
+              /^edit$/i,
+              /^复制$/i,
+              /^copy$/i,
+              /^重试$/i,
+              /^retry$/i,
+              /^重新生成$/i,
+              /^regenerate$/i,
+              /^搜索$/i,
+              /^search$/i,
+              /^语音$/i,
+              /^voice$/i,
+              /^expert$/i,
+              /^deepsearch$/i,
+              /^grok$/i
+            ].some(pattern => pattern.test(text));
+          };
+
+          const normalizeRole = (value: unknown): ConversationRole | null => {
+            if (typeof value !== "string") {
+              return null;
+            }
+
+            const normalized = value.trim().toLowerCase();
+            if (!normalized) {
+              return null;
+            }
+
+            if (["user", "human", "prompt", "question", "asker", "requester"].includes(normalized)) {
+              return "user";
+            }
+
+            if (["assistant", "grok", "ai", "model", "bot", "answer", "response"].includes(normalized)) {
+              return "assistant";
+            }
+
+            return null;
+          };
+
+          const textKeys = [
+            "text",
+            "body",
+            "markdown",
+            "content",
+            "message",
+            "prompt",
+            "query",
+            "answer",
+            "response",
+            "output",
+            "input",
+            "value",
+            "parts",
+            "segments",
+            "chunks",
+            "fragments",
+            "blocks",
+            "children",
+            "items",
+            "nodes"
+          ];
+
+          const collectTextCandidates = (value: unknown, depth = 0, seen = new WeakSet<object>()): string[] => {
+            if (depth > 5 || value == null) {
+              return [];
+            }
+
+            if (typeof value === "string") {
+              const normalized = normalizeText(value);
+              if (!normalized || isUiNoiseText(normalized)) {
+                return [];
+              }
+              return [normalized];
+            }
+
+            if (typeof value === "number" || typeof value === "boolean") {
+              return [];
+            }
+
+            if (Array.isArray(value)) {
+              return unique(
+                value
+                  .slice(0, 24)
+                  .flatMap(item => collectTextCandidates(item, depth + 1, seen))
+                  .filter(candidate => candidate.length > 0)
+              );
+            }
+
+            if (typeof value !== "object") {
+              return [];
+            }
+
+            if (seen.has(value)) {
+              return [];
+            }
+            seen.add(value);
+
+            const record = value as Record<string, unknown>;
+            const candidates: string[] = [];
+
+            for (const key of textKeys) {
+              if (!(key in record)) {
+                continue;
+              }
+              candidates.push(...collectTextCandidates(record[key], depth + 1, seen));
+            }
+
+            if (candidates.length > 0) {
+              return unique(candidates);
+            }
+
+            return unique(
+              Object.values(record)
+                .slice(0, 16)
+                .flatMap(entry => collectTextCandidates(entry, depth + 1, seen))
+            );
+          };
+
+          const extractRole = (value: unknown): ConversationRole | null => {
+            if (!value || typeof value !== "object") {
+              return null;
+            }
+
+            const record = value as Record<string, unknown>;
+
+            if (record.isUser === true || record.fromUser === true) {
+              return "user";
+            }
+
+            if (record.isAssistant === true || record.fromAssistant === true || record.isBot === true) {
+              return "assistant";
+            }
+
+            const roleFields = ["role", "sender", "author", "source", "name", "type", "speaker"];
+            for (const key of roleFields) {
+              const normalized = normalizeRole(record[key]);
+              if (normalized) {
+                return normalized;
+              }
+            }
+
+            return null;
+          };
+
+          const extractTimestamp = (value: unknown): number | undefined => {
+            if (!value || typeof value !== "object") {
+              return undefined;
+            }
+
+            const record = value as Record<string, unknown>;
+            const keys = ["createdAt", "updatedAt", "timestamp", "time", "created_at"];
+
+            for (const key of keys) {
+              const raw = record[key];
+              if (typeof raw === "number" && Number.isFinite(raw)) {
+                return raw;
+              }
+              if (typeof raw === "string") {
+                const numeric = Number(raw);
+                if (Number.isFinite(numeric)) {
+                  return numeric;
+                }
+                const parsed = Date.parse(raw);
+                if (Number.isFinite(parsed)) {
+                  return parsed;
+                }
+              }
+            }
+
+            return undefined;
+          };
+
+          const extractCandidateTurn = (value: unknown, order: number): RuntimeTurn | null => {
+            if (!value || typeof value !== "object") {
+              return null;
+            }
+
+            const role = extractRole(value);
+            if (!role) {
+              return null;
+            }
+
+            const textCandidates = collectTextCandidates(value)
+              .filter(candidate => candidate.length >= 2)
+              .sort((left, right) => right.length - left.length);
+
+            const text = textCandidates[0];
+            if (!text) {
+              return null;
+            }
+
+            return {
+              role,
+              text,
+              order,
+              timestamp: extractTimestamp(value)
+            };
+          };
+
+          const scoreTurnArray = (turns: RuntimeTurn[]) => {
+            const userCount = turns.filter(turn => turn.role === "user").length;
+            const assistantCount = turns.filter(turn => turn.role === "assistant").length;
+            if (userCount === 0 || assistantCount === 0 || turns.length < 2) {
+              return Number.NEGATIVE_INFINITY;
+            }
+
+            const totalTextLength = turns.reduce((sum, turn) => sum + turn.text.length, 0);
+            const roleTransitions = turns.slice(1).reduce((sum, turn, index) => {
+              return sum + (turn.role !== turns[index].role ? 1 : 0);
+            }, 0);
+
+            return turns.length * 400 + Math.min(totalTextLength, 20000) + roleTransitions * 250;
+          };
+
+          const extractRuntimeTurns = (): RuntimeTurn[] => {
+            const explicitRootNames = [
+              "__NEXT_DATA__",
+              "__INITIAL_STATE__",
+              "__PRELOADED_STATE__",
+              "__APOLLO_STATE__",
+              "__REMIX_CONTEXT__",
+              "__remixContext",
+              "__NUXT__",
+              "__data"
+            ];
+
+            const roots: unknown[] = [];
+            const windowRecord = window as unknown as Record<string, unknown>;
+
+            for (const name of explicitRootNames) {
+              const value = windowRecord[name];
+              if (value != null) {
+                roots.push(value);
+              }
+            }
+
+            for (const name of Object.getOwnPropertyNames(window)) {
+              if (!/(message|conversation|chat|state|data|cache|apollo|redux|query|grok|turn)/i.test(name)) {
+                continue;
+              }
+              try {
+                const value = windowRecord[name];
+                if (value != null) {
+                  roots.push(value);
+                }
+              } catch {
+                // Ignore inaccessible properties.
+              }
+            }
+
+            const queue = roots.map(value => ({ value, depth: 0 }));
+            const seen = new WeakSet<object>();
+            let bestTurns: RuntimeTurn[] = [];
+            let bestScore = Number.NEGATIVE_INFINITY;
+            let visited = 0;
+
+            while (queue.length > 0 && visited < 8000) {
+              const current = queue.shift();
+              if (!current) {
+                break;
+              }
+
+              const { value, depth } = current;
+              if (value == null || typeof value !== "object") {
+                continue;
+              }
+
+              if (seen.has(value)) {
+                continue;
+              }
+              seen.add(value);
+              visited += 1;
+
+              if (Array.isArray(value)) {
+                const turns = value
+                  .slice(0, 200)
+                  .map((item, index) => extractCandidateTurn(item, index))
+                  .filter((turn): turn is RuntimeTurn => !!turn)
+                  .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index);
+
+                const score = scoreTurnArray(turns);
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestTurns = turns;
+                }
+              }
+
+              if (depth >= 6) {
+                continue;
+              }
+
+              const children = Array.isArray(value) ? value.slice(0, 80) : Object.values(value as Record<string, unknown>).slice(0, 80);
+              for (const child of children) {
+                if (child && typeof child === "object") {
+                  queue.push({ value: child, depth: depth + 1 });
+                }
+              }
+            }
+
+            return bestTurns
+              .sort((left, right) => {
+                if (left.timestamp != null && right.timestamp != null && left.timestamp !== right.timestamp) {
+                  return left.timestamp - right.timestamp;
+                }
+                return left.order - right.order;
+              })
+              .filter((turn, index, list) => list.findIndex(candidate => candidate.role === turn.role && candidate.text === turn.text) === index);
+          };
+
+          const buildSnippets = (text: string) => {
+            const candidates = text
+              .split(/\n+/)
+              .flatMap(part => part.split(/[。！？.!?]/))
+              .map(part => normalizeText(part))
+              .filter(part => part.length >= 12 && part.length <= 160)
+              .sort((left, right) => right.length - left.length);
+
+            return unique(candidates).slice(0, 4);
+          };
+
+          const collectRoots = () => {
+            const roots: ParentNode[] = [document];
+            const queue: ParentNode[] = [document];
+            const seen = new Set<ParentNode>([document]);
+
+            while (queue.length > 0) {
+              const root = queue.shift();
+              if (!root || typeof root.querySelectorAll !== "function") {
+                continue;
+              }
+
+              const elements = Array.from(root.querySelectorAll("*"));
+              for (const element of elements) {
+                if (element.shadowRoot && !seen.has(element.shadowRoot)) {
+                  seen.add(element.shadowRoot);
+                  roots.push(element.shadowRoot);
+                  queue.push(element.shadowRoot);
+                }
+              }
+            }
+
+            return roots;
+          };
+
+          const findElementForMessage = (messageText: string, usedElements: Set<HTMLElement>) => {
+            const roots = collectRoots();
+            const snippets = buildSnippets(messageText);
+            const fallbackSnippet = normalizeText(messageText).slice(0, 120);
+            const querySnippets = snippets.length > 0 ? snippets : (fallbackSnippet ? [fallbackSnippet] : []);
+            const candidates: Array<{ element: HTMLElement; score: number }> = [];
+
+            if (querySnippets.length === 0) {
+              return null;
+            }
+
+            for (const root of roots) {
+              const elements = Array.from(
+                root.querySelectorAll<HTMLElement>("article, section, div, p, li, pre, table, blockquote")
+              );
+
+              for (const element of elements) {
+                if (usedElements.has(element)) {
+                  continue;
+                }
+
+                if (element.closest("nav, aside, footer, form, button")) {
+                  continue;
+                }
+
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 120 || rect.height < 18) {
+                  continue;
+                }
+
+                const text = normalizeText(element.innerText || element.textContent);
+                if (!text || text.length < 8) {
+                  continue;
+                }
+
+                const matchedSnippets = querySnippets.filter(snippet => text.includes(snippet));
+                if (matchedSnippets.length === 0) {
+                  continue;
+                }
+
+                const structuredBonus = element.querySelector("p, pre, ul, ol, li, table, blockquote, img") ? 220 : 0;
+                const closeness = Math.max(0, 800 - Math.abs(text.length - messageText.length));
+                const exactBonus = text === normalizeText(messageText) ? 400 : 0;
+
+                candidates.push({
+                  element,
+                  score: matchedSnippets.length * 1000 + structuredBonus + closeness + exactBonus
+                });
+              }
+            }
+
+            candidates.sort((left, right) => right.score - left.score);
+            return candidates[0]?.element ?? null;
+          };
+
+          const findTurnContainer = (match: HTMLElement, currentText: string, neighboringTexts: string[]) => {
+            let candidate = match;
+            const currentSnippets = buildSnippets(currentText).slice(0, 2);
+            const neighboringSnippets = neighboringTexts.flatMap(text => buildSnippets(text).slice(0, 1));
+            const scope = document.querySelector("main") ?? document.body;
+
+            for (let current = match.parentElement; current && current !== scope; current = current.parentElement) {
+              const text = normalizeText(current.innerText || current.textContent);
+              if (!text) {
+                continue;
+              }
+
+              const containsCurrent = currentSnippets.every(snippet => text.includes(snippet));
+              const containsNeighbor = neighboringSnippets.some(snippet => text.includes(snippet));
+
+              if (!containsCurrent || containsNeighbor) {
+                break;
+              }
+
+              if (text.length > currentText.length * 6) {
+                break;
+              }
+
+              candidate = current;
+            }
+
+            return candidate;
+          };
+
+          const sanitizeTurnClone = (source: HTMLElement) => {
+            const clone = source.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll(
+              "button, textarea, input, select, form, nav, aside, footer, canvas, svg, audio, video"
+            ).forEach(node => node.remove());
+
+            clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach(node => {
+              node.removeAttribute("contenteditable");
+            });
+
+            const allNodes = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))];
+            for (const node of allNodes.reverse()) {
+              if (node.closest("pre, code, table")) {
+                continue;
+              }
+
+              const text = normalizeText(node.innerText || node.textContent);
+              if (!text) {
+                continue;
+              }
+
+              if (text.length <= 40 && isUiNoiseText(text) && !node.querySelector("img")) {
+                node.remove();
+              }
+            }
+
+            clone.querySelectorAll<HTMLElement>("div, section, article, span, p, li").forEach(node => {
+              const text = normalizeText(node.innerText || node.textContent);
+              if (!text && !node.querySelector("img, pre, code, table, ul, ol, blockquote")) {
+                node.remove();
+              }
+            });
+
+            return clone;
+          };
+
+          const appendPlainText = (container: HTMLElement, text: string) => {
+            const blocks = text
+              .replace(/\r\n?/g, "\n")
+              .split(/\n{2,}/)
+              .map(block => block.trim())
+              .filter(Boolean);
+
+            const appendMarkdownTable = (tableLines: string[]) => {
+              const rows = tableLines
+                .map(line => line.trim())
+                .filter(Boolean)
+                .map(line => line.replace(/^\||\|$/g, "").split("|").map(cell => cell.trim()));
+
+              if (rows.length < 2) {
+                return false;
+              }
+
+              const separatorIndex = rows.findIndex(row => row.every(cell => /^:?-{3,}:?$/.test(cell)));
+              if (separatorIndex !== 1) {
+                return false;
+              }
+
+              const table = document.createElement("table");
+              const thead = document.createElement("thead");
+              const headerRow = document.createElement("tr");
+              for (const cellText of rows[0]) {
+                const th = document.createElement("th");
+                th.textContent = cellText;
+                headerRow.appendChild(th);
+              }
+              thead.appendChild(headerRow);
+              table.appendChild(thead);
+
+              const tbody = document.createElement("tbody");
+              for (const row of rows.slice(2)) {
+                const tr = document.createElement("tr");
+                for (const cellText of row) {
+                  const td = document.createElement("td");
+                  td.textContent = cellText;
+                  tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+              }
+              table.appendChild(tbody);
+              container.appendChild(table);
+              return true;
+            };
+
+            for (const block of blocks) {
+              const lines = block
+                .split("\n")
+                .map(line => line.trim())
+                .filter(Boolean);
+
+              if (lines.length === 0) {
+                continue;
+              }
+
+              if (lines.every(line => /^\|.*\|$/.test(line)) && appendMarkdownTable(lines)) {
+                continue;
+              }
+
+              if (lines.every(line => /^[-*]\s+/.test(line))) {
+                const list = document.createElement("ul");
+                for (const line of lines) {
+                  const li = document.createElement("li");
+                  li.textContent = line.replace(/^[-*]\s+/, "");
+                  list.appendChild(li);
+                }
+                container.appendChild(list);
+                continue;
+              }
+
+              if (lines.every(line => /^\d+\.\s+/.test(line))) {
+                const list = document.createElement("ol");
+                for (const line of lines) {
+                  const li = document.createElement("li");
+                  li.textContent = line.replace(/^\d+\.\s+/, "");
+                  list.appendChild(li);
+                }
+                container.appendChild(list);
+                continue;
+              }
+
+              const paragraph = document.createElement("p");
+              paragraph.textContent = lines.join(" ");
+              container.appendChild(paragraph);
+            }
+          };
+
+          const runtimeTurns = extractRuntimeTurns();
+          if (runtimeTurns.length === 0) {
+            return null;
+          }
+
+          const article = document.createElement("article");
+          const usedElements = new Set<HTMLElement>();
+          let firstUserText = "";
+          let firstAssistantText = "";
+
+          for (const [index, turn] of runtimeTurns.entries()) {
+            if (!firstUserText && turn.role === "user") {
+              firstUserText = turn.text;
+            }
+            if (!firstAssistantText && turn.role === "assistant") {
+              firstAssistantText = turn.text;
+            }
+
+            const elementMatch = findElementForMessage(turn.text, usedElements);
+            const neighboringTexts = runtimeTurns
+              .filter((_candidate, candidateIndex) => candidateIndex !== index)
+              .map(candidate => candidate.text);
+
+            const section = document.createElement("section");
+            section.setAttribute("data-grok-role", turn.role);
+
+            const heading = document.createElement("h1");
+            heading.textContent = turn.role === "user" ? userRoleLabel : assistantRoleLabel;
+            section.appendChild(heading);
+
+            if (elementMatch) {
+              const container = findTurnContainer(elementMatch, turn.text, neighboringTexts);
+              usedElements.add(elementMatch);
+              usedElements.add(container);
+
+              const clone = sanitizeTurnClone(container);
+              const cleanedText = normalizeText(clone.innerText || clone.textContent);
+              const hasStructuredContent = !!clone.querySelector("p, pre, ul, ol, li, table, blockquote, img");
+
+              if (cleanedText || hasStructuredContent) {
+                section.append(...Array.from(clone.childNodes));
+              } else {
+                appendPlainText(section, turn.text);
+              }
+            } else {
+              appendPlainText(section, turn.text);
+            }
+
+            article.appendChild(section);
+          }
+
+          const titleFromDocument = (document.title || "")
+            .replace(/\s*[-|]\s*Grok\s*$/i, "")
+            .trim();
+
+          const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : fallbackConversationTitle;
+          const excerptSource = firstAssistantText || firstUserText;
+
+          return {
+            title: titleFromDocument || fallbackTitle,
+            excerpt: excerptSource ? excerptSource.slice(0, 220) : null,
+            bodyHtml: article.innerHTML,
+            language: document.documentElement.lang || navigator.language || null
+          };
+        }
+      });
+
+      const grokPayload = grokResults?.[0]?.result as SerializedGrokConversation | null | undefined;
+      if (grokPayload?.bodyHtml) {
+        const grokDoc = new DOMParser().parseFromString("<!DOCTYPE html><html><head></head><body></body></html>", "text/html");
+        const grokArticle = buildGrokConversationFromSerializedPayload(grokDoc, url, grokPayload);
+        if (grokArticle) {
+          console.log(`从 Grok 标签页提取正文：${grokArticle.images.length} 张图片，${grokArticle.textContent.length} 字符`);
+          return {
+            ...grokArticle,
+            fetchedAt: Date.now()
+          };
+        }
+      }
+    }
+
     const isSubstackWrapperUrl = (() => {
       try {
         const parsed = new URL(url);
@@ -2232,6 +2940,7 @@ function isDynamicContentSite(url: string): boolean {
     'medium.com',
     'twitter.com',
     'x.com',
+    'grok.com',
     'chatgpt.com',
     'chat.openai.com',
     'gemini.google.com',
@@ -2271,7 +2980,7 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
 
 请先在浏览器中打开该页面，等待内容完全加载后，再点击扩展图标进行提取。
 
-支持动态加载的网站：Substack, Medium, Twitter/X, ChatGPT, Gemini, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
+支持动态加载的网站：Substack, Medium, Twitter/X, Grok, ChatGPT, Gemini, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
     }
   }
 
