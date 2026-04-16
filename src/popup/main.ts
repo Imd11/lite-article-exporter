@@ -33,15 +33,17 @@ function renderUI() {
   const formats = getFormatOptions();
 
   app.innerHTML = `
-  <section class="section card">
-    <div>
+  <section class="section card card-hero">
+    <div class="hero-header">
       <h1>${t("appTitle")}</h1>
       <p class="status" id="status" role="status" aria-live="polite"></p>
     </div>
-    <form id="export-form">
-      <label for="url-input">${t("urlInputLabel")}</label>
-      <input id="url-input" type="url" name="url" placeholder="${t("urlPlaceholder")}" required />
-      <div class="section">
+    <form id="export-form" class="form-shell">
+      <div class="field-group">
+        <label for="url-input">${t("urlInputLabel")}</label>
+        <input id="url-input" type="url" name="url" placeholder="${t("urlPlaceholder")}" required />
+      </div>
+      <div class="section format-section">
         <label>${t("formatSelectLabel")}</label>
         <div class="options-grid" id="format-options">
           ${formats
@@ -49,9 +51,11 @@ function renderUI() {
               option => `
               <label class="option-tile">
                 <input type="checkbox" name="formats" value="${option.value}" />
-                <span>
-                  <strong>${option.icon} ${option.label}</strong>
+                <span class="option-tile-icon" aria-hidden="true">${option.icon}</span>
+                <span class="option-tile-copy">
+                  <strong class="option-tile-label">${option.label}</strong>
                 </span>
+                <span class="option-tile-check" aria-hidden="true"></span>
               </label>
             `
             )
@@ -61,7 +65,7 @@ function renderUI() {
       <button type="submit" id="export-button">${t("downloadButton")}</button>
     </form>
   </section>
-  <section class="section" id="preview-section" hidden>
+  <section class="section card card-preview" id="preview-section" hidden>
     <div class="summary">
       <div class="summary-chips">
         <span class="summary-chip" id="article-domain"></span>
@@ -72,7 +76,7 @@ function renderUI() {
       <p id="article-excerpt"></p>
     </div>
   </section>
-  <section class="history card" id="history-section">
+  <section class="history card card-history" id="history-section">
     <div class="history-header">
       <h2>${t("historyTitle")}</h2>
       <div class="history-toolbar">
