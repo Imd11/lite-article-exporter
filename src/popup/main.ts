@@ -65,17 +65,6 @@ function renderUI() {
       <button type="submit" id="export-button">${t("downloadButton")}</button>
     </form>
   </section>
-  <section class="section card card-preview" id="preview-section" hidden>
-    <div class="summary">
-      <div class="summary-chips">
-        <span class="summary-chip" id="article-domain"></span>
-        <span class="summary-chip" id="article-stats"></span>
-      </div>
-      <h2 id="article-title"></h2>
-      <p id="article-meta"></p>
-      <p id="article-excerpt"></p>
-    </div>
-  </section>
   <section class="history card card-history" id="history-section">
     <div class="history-header">
       <h2>${t("historyTitle")}</h2>
@@ -98,12 +87,6 @@ const exportButton = document.getElementById("export-button") as HTMLButtonEleme
 const historyList = document.getElementById("history-list") as HTMLDivElement;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
-const articleTitleEl = document.getElementById("article-title") as HTMLHeadingElement;
-const articleDomainEl = document.getElementById("article-domain") as HTMLSpanElement;
-const articleMetaEl = document.getElementById("article-meta") as HTMLParagraphElement;
-const articleExcerptEl = document.getElementById("article-excerpt") as HTMLParagraphElement;
-const articleStatsEl = document.getElementById("article-stats") as HTMLSpanElement;
-const previewSection = document.getElementById("preview-section") as HTMLDivElement;
 
 exportButton.disabled = true;
 
@@ -132,7 +115,6 @@ async function initialize() {
 
 function handleUrlInputChange() {
   state.article = null;
-  previewSection.hidden = true;
   if (urlInput.value.trim().length === 0) {
     setStatus(t("statusIdle"));
   } else {
@@ -237,14 +219,12 @@ async function ensureArticle(url: string): Promise<ArticleData | null> {
     if (article.url !== urlInput.value.trim()) {
       urlInput.value = article.url;
     }
-    renderArticle(article);
     setStatus(t("statusExtracted"), false);
     return article;
   } catch (error) {
     console.error(error);
     setStatus(getLocalizedExtractErrorMessage(error), true);
     state.article = null;
-    previewSection.hidden = true;
     return null;
   } finally {
     setLoading(false);
@@ -307,20 +287,6 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
 function getSelectedFormats(): ExportFormat[] {
   const checkboxes = formEl.querySelectorAll<HTMLInputElement>('input[name="formats"]:checked');
   return Array.from(checkboxes).map(box => box.value as ExportFormat);
-}
-
-function renderArticle(article: ArticleData) {
-  const hostname = getHostname(article.url);
-  articleTitleEl.textContent = article.title;
-  articleDomainEl.textContent = hostname;
-  articleMetaEl.textContent = article.byline ? t("articleMetaAuthorLine", article.byline) : "";
-  articleMetaEl.hidden = !article.byline;
-  articleExcerptEl.textContent = (article.excerpt || article.textContent).slice(0, 140);
-  const wordCount = Math.round(article.textContent.length / 2).toLocaleString();
-  const imageCount = article.images.length.toLocaleString();
-  articleStatsEl.textContent = t("articleStatsLine", [wordCount, imageCount]);
-  previewSection.hidden = false;
-  updateExportButtonState();
 }
 
 async function loadHistory() {
