@@ -388,6 +388,14 @@ function getLocalizedExtractErrorMessage(error: unknown): string {
   const normalized = raw.toLowerCase();
 
   if (
+    normalized.includes("too short") ||
+    normalized.includes("paywall") ||
+    raw.includes("内容过短")
+  ) {
+    return t("statusContentTooShort");
+  }
+
+  if (
     normalized.includes("dynamic") ||
     normalized.includes("substack") ||
     normalized.includes("medium") ||
@@ -398,6 +406,14 @@ function getLocalizedExtractErrorMessage(error: unknown): string {
   }
 
   if (
+    raw.includes("未找到真正正文") ||
+    raw.includes("提取失败") ||
+    raw.includes("提取内容")
+  ) {
+    return t("statusExtractFailed");
+  }
+
+  if (
     normalized.includes("browser") ||
     normalized.includes("tab") ||
     raw.includes("标签页") ||
@@ -405,14 +421,6 @@ function getLocalizedExtractErrorMessage(error: unknown): string {
     raw.includes("从标签页获取失败")
   ) {
     return t("statusNoTabFound");
-  }
-
-  if (
-    normalized.includes("too short") ||
-    normalized.includes("paywall") ||
-    raw.includes("内容过短")
-  ) {
-    return t("statusContentTooShort");
   }
 
   return t("statusExtractFailed");

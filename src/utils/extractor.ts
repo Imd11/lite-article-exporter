@@ -702,7 +702,14 @@ function isChatGptHost(hostname: string): boolean {
 function isChatGptConversationUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return isChatGptHost(parsed.hostname) && (parsed.pathname.startsWith("/c/") || parsed.pathname.startsWith("/share/"));
+    return (
+      isChatGptHost(parsed.hostname) &&
+      (
+        parsed.pathname.startsWith("/c/") ||
+        parsed.pathname.startsWith("/share/") ||
+        /^\/g\/[^/]+\/c\/[^/]+/.test(parsed.pathname)
+      )
+    );
   } catch {
     return false;
   }
@@ -3489,6 +3496,9 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
         return await fetchArticleFromTab(matchingTabId, url);
       } catch (tabError) {
         console.warn("从标签页获取失败", tabError);
+        if (tabError instanceof Error) {
+          throw tabError;
+        }
         throw new Error("无法从标签页获取内容。请确保该页面已在浏览器中完全打开并加载完成。");
       }
     } else {
