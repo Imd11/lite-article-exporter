@@ -59,9 +59,21 @@
     "message": "一键下载",
     "description": "下载按钮文本"
   },
+  "versionHistoryButton": {
+    "message": "查看版本历史",
+    "description": "打开版本历史页面"
+  },
   "historyTitle": {
     "message": "下载记录",
     "description": "历史记录标题"
+  },
+  "changelogPageTitle": {
+    "message": "版本历史 — Lite Article Exporter",
+    "description": "版本历史页面标题"
+  },
+  "changelogHeroTitle": {
+    "message": "版本历史",
+    "description": "版本历史页面主标题"
   },
   "historySearchPlaceholder": {
     "message": "搜索标题或链接",
@@ -287,6 +299,54 @@
   "grokRoleAssistantSaid": {
     "message": "Grok said",
     "description": "导出 Grok 对话中的助手段落标题"
+  },
+  "changelog104Item1": {
+    "message": "增强 ChatGPT、Gemini、Grok 对话内容导出",
+    "description": "1.0.4 版本更新项"
+  },
+  "changelog104Item2": {
+    "message": "修复角色称谓、标题和正文提取错误",
+    "description": "1.0.4 版本更新项"
+  },
+  "changelog104Item3": {
+    "message": "优化插件面板布局和视觉样式",
+    "description": "1.0.4 版本更新项"
+  },
+  "changelog103Item1": {
+    "message": "提升动态网页内容提取成功率",
+    "description": "1.0.3 版本更新项"
+  },
+  "changelog103Item2": {
+    "message": "优化 PDF 导出的中文显示效果",
+    "description": "1.0.3 版本更新项"
+  },
+  "changelog103Item3": {
+    "message": "改进 Markdown、Word、PDF、TXT 的导出一致性",
+    "description": "1.0.3 版本更新项"
+  },
+  "changelog102Item1": {
+    "message": "修复 Markdown 导出中的表格渲染问题",
+    "description": "1.0.2 版本更新项"
+  },
+  "changelog102Item2": {
+    "message": "提升复杂正文结构的导出稳定性",
+    "description": "1.0.2 版本更新项"
+  },
+  "changelog011Item1": {
+    "message": "重构插件界面，提升整体可读性和操作体验",
+    "description": "0.1.1 版本更新项"
+  },
+  "changelog011Item2": {
+    "message": "修复图片提取问题，改善动态网页兼容性",
+    "description": "0.1.1 版本更新项"
+  },
+  "changelog011Item3": {
+    "message": "新增中英文界面支持",
+    "description": "0.1.1 版本更新项"
+  },
+  "changelog010Item1": {
+    "message": "首次发布 Lite Article Exporter，支持提取网页正文并导出为 Markdown、Word、PDF、TXT",
+    "description": "0.1.0 版本更新项"
   },
   "defaultTitle": {
     "message": "未命名文章",

@@ -25,6 +25,7 @@ export interface I18nKey {
   // 按钮
   downloadButton: string;
   historyClearButton: string;
+  versionHistoryButton: string;
 
   // 状态消息
   statusIdle: string;
@@ -65,6 +66,8 @@ export interface I18nKey {
   exportAuthorLine: string;
   exportImageUnavailable: string;
   exportImageCaption: string;
+  changelogPageTitle: string;
+  changelogHeroTitle: string;
   chatConversationTitle: string;
   chatSharedConversationTitle: string;
   geminiConversationTitle: string;
@@ -77,6 +80,18 @@ export interface I18nKey {
   geminiRoleAssistantSaid: string;
   grokRoleYouSaid: string;
   grokRoleAssistantSaid: string;
+  changelog104Item1: string;
+  changelog104Item2: string;
+  changelog104Item3: string;
+  changelog103Item1: string;
+  changelog103Item2: string;
+  changelog103Item3: string;
+  changelog102Item1: string;
+  changelog102Item2: string;
+  changelog011Item1: string;
+  changelog011Item2: string;
+  changelog011Item3: string;
+  changelog010Item1: string;
 
   // 其他
   defaultTitle: string;

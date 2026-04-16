@@ -135,6 +135,34 @@ label {
   margin-bottom: 12px;
 }
 
+.hero-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.version-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.version-link:hover {
+  color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
 .status {
   min-height: 24px;
   padding: 9px 12px;

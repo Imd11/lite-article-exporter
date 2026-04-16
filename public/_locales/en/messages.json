@@ -59,9 +59,21 @@
     "message": "Download",
     "description": "Download button text"
   },
+  "versionHistoryButton": {
+    "message": "View version history",
+    "description": "Open version history page"
+  },
   "historyTitle": {
     "message": "History",
     "description": "History section title"
+  },
+  "changelogPageTitle": {
+    "message": "Version History — Lite Article Exporter",
+    "description": "Version history page title"
+  },
+  "changelogHeroTitle": {
+    "message": "Version History",
+    "description": "Version history page heading"
   },
   "historySearchPlaceholder": {
     "message": "Search by title or URL",
@@ -287,6 +299,54 @@
   "grokRoleAssistantSaid": {
     "message": "Grok said",
     "description": "Assistant section heading in exported Grok conversations"
+  },
+  "changelog104Item1": {
+    "message": "Improved conversation export for ChatGPT, Gemini, and Grok.",
+    "description": "Changelog item for version 1.0.4"
+  },
+  "changelog104Item2": {
+    "message": "Fixed issues with speaker labels, titles, and main content extraction.",
+    "description": "Changelog item for version 1.0.4"
+  },
+  "changelog104Item3": {
+    "message": "Refined the popup layout and overall visual design.",
+    "description": "Changelog item for version 1.0.4"
+  },
+  "changelog103Item1": {
+    "message": "Improved extraction reliability for dynamic websites.",
+    "description": "Changelog item for version 1.0.3"
+  },
+  "changelog103Item2": {
+    "message": "Enhanced Chinese rendering in PDF exports.",
+    "description": "Changelog item for version 1.0.3"
+  },
+  "changelog103Item3": {
+    "message": "Improved consistency across Markdown, Word, PDF, and TXT exports.",
+    "description": "Changelog item for version 1.0.3"
+  },
+  "changelog102Item1": {
+    "message": "Fixed table rendering in Markdown exports.",
+    "description": "Changelog item for version 1.0.2"
+  },
+  "changelog102Item2": {
+    "message": "Improved export stability for complex article layouts.",
+    "description": "Changelog item for version 1.0.2"
+  },
+  "changelog011Item1": {
+    "message": "Refreshed the popup UI for better readability and usability.",
+    "description": "Changelog item for version 0.1.1"
+  },
+  "changelog011Item2": {
+    "message": "Fixed image extraction issues and improved dynamic site compatibility.",
+    "description": "Changelog item for version 0.1.1"
+  },
+  "changelog011Item3": {
+    "message": "Added Chinese and English interface support.",
+    "description": "Changelog item for version 0.1.1"
+  },
+  "changelog010Item1": {
+    "message": "Initial release of Lite Article Exporter with support for exporting clean article content to Markdown, Word, PDF, and TXT.",
+    "description": "Changelog item for version 0.1.0"
   },
   "defaultTitle": {
     "message": "Untitled Article",

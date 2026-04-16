@@ -25,6 +25,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_FORMATS: ExportFormat[] = ["markdown"];
+const manifestVersion = chrome.runtime.getManifest().version;
 
 const app = document.getElementById("app") as HTMLDivElement;
 
@@ -35,7 +36,16 @@ function renderUI() {
   app.innerHTML = `
   <section class="section card card-hero">
     <div class="hero-header">
-      <h1>${t("appTitle")}</h1>
+      <div class="hero-title-row">
+        <h1>${t("appTitle")}</h1>
+        <button
+          type="button"
+          id="version-history-link"
+          class="version-link"
+          aria-label="${t("versionHistoryButton")}"
+          title="${t("versionHistoryButton")}"
+        >v${manifestVersion}</button>
+      </div>
       <p class="status" id="status" role="status" aria-live="polite"></p>
     </div>
     <form id="export-form" class="form-shell">
@@ -87,6 +97,7 @@ const exportButton = document.getElementById("export-button") as HTMLButtonEleme
 const historyList = document.getElementById("history-list") as HTMLDivElement;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
+const versionHistoryLink = document.getElementById("version-history-link") as HTMLButtonElement;
 
 exportButton.disabled = true;
 
@@ -97,6 +108,7 @@ formEl
   .forEach(box => box.addEventListener("change", handleFormatChange));
 historySearchInput.addEventListener("input", handleHistorySearchChange);
 historyClearButton.addEventListener("click", handleHistoryClearClick);
+versionHistoryLink.addEventListener("click", openVersionHistory);
 
 void initialize();
 
@@ -179,6 +191,12 @@ async function handleHistoryClearClick() {
   historySearchInput.value = "";
   renderHistory();
   setStatus(t("historyCleared"));
+}
+
+function openVersionHistory() {
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL("changelog/index.html")
+  });
 }
 
 async function handleExportSubmit(event: Event) {
