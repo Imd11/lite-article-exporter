@@ -18,6 +18,12 @@
 
   /* 功能色 */
   --success: #10b981;
+  --success-strong: #22c55e;
+  --success-deep: #15803d;
+  --action-ready-start: #22c55e;
+  --action-ready-end: #16a34a;
+  --action-busy-start: #38bdf8;
+  --action-busy-end: #2563eb;
   --error: #ef4444;
   --warning: #f59e0b;
 
@@ -192,16 +198,24 @@ input[type="url"]:focus {
 
 /* === 按钮 === */
 button[type="submit"] {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   padding: 14px;
   font-size: 14px;
   font-weight: 600;
   color: #fff;
+  letter-spacing: 0.01em;
   background: linear-gradient(135deg, #3f3f46, #52525b);
-  border: none;
+  border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    filter 0.2s ease;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
 
@@ -212,8 +226,69 @@ button[type="submit"]:hover:not(:disabled) {
 }
 
 button[type="submit"]:disabled {
-  opacity: 0.5;
+  opacity: 0.58;
+  color: rgb(255 255 255 / 0.88);
+  background: linear-gradient(180deg, #4a4a54, #3d3d45);
+  border-color: rgb(255 255 255 / 0.04);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
   cursor: not-allowed;
+  transform: none;
+}
+
+button[type="submit"].is-ready {
+  background:
+    radial-gradient(circle at top, rgb(255 255 255 / 0.16), transparent 45%),
+    linear-gradient(135deg, var(--action-ready-start), var(--action-ready-end));
+  border-color: rgb(74 222 128 / 0.42);
+  box-shadow:
+    0 10px 24px rgb(22 163 74 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+button[type="submit"].is-ready::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgb(255 255 255 / 0.16) 50%, transparent 100%);
+  transform: translateX(-120%);
+  transition: transform 0.35s ease;
+}
+
+button[type="submit"].is-ready:hover:not(:disabled) {
+  background:
+    radial-gradient(circle at top, rgb(255 255 255 / 0.22), transparent 45%),
+    linear-gradient(135deg, #34d399, #16a34a);
+  border-color: rgb(134 239 172 / 0.6);
+  box-shadow:
+    0 14px 30px rgb(22 163 74 / 0.34),
+    0 0 0 3px rgb(34 197 94 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.22);
+  filter: saturate(1.05);
+}
+
+button[type="submit"].is-ready:hover:not(:disabled)::before {
+  transform: translateX(120%);
+}
+
+button[type="submit"].is-ready:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow:
+    0 8px 18px rgb(22 163 74 / 0.26),
+    inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+
+button[type="submit"].is-busy {
+  background:
+    radial-gradient(circle at top, rgb(255 255 255 / 0.16), transparent 45%),
+    linear-gradient(135deg, var(--action-busy-start), var(--action-busy-end));
+  border-color: rgb(125 211 252 / 0.4);
+  box-shadow:
+    0 10px 24px rgb(37 99 235 / 0.24),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+button[type="submit"].is-busy:not(:disabled) {
+  cursor: progress;
 }
 
 /* === 卡片容器 === */

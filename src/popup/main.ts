@@ -226,6 +226,9 @@ async function ensureArticle(url: string): Promise<ArticleData | null> {
   try {
     const article = await fetchArticle(url);
     state.article = article;
+    if (article.url !== urlInput.value.trim()) {
+      urlInput.value = article.url;
+    }
     renderArticle(article);
     setStatus(t("statusExtracted"), false);
     return article;
@@ -399,14 +402,20 @@ function setLoading(loading: boolean) {
 
 function updateExportButtonState() {
   const hasUrl = urlInput.value.trim().length > 0;
-  const articleMatchesUrl = state.article && state.article.url === urlInput.value.trim();
+  const articleMatchesUrl = state.article && urlsMatch(state.article.url, urlInput.value.trim());
   const hasFormats = getSelectedFormats().length > 0;
-  exportButton.disabled =
-    !hasUrl ||
-    !articleMatchesUrl ||
-    state.isLoading ||
-    state.isExporting ||
-    !hasFormats;
+  const canExport =
+    hasUrl &&
+    !!articleMatchesUrl &&
+    !state.isLoading &&
+    !state.isExporting &&
+    hasFormats;
+
+  exportButton.disabled = !canExport;
+  exportButton.classList.toggle("is-ready", canExport);
+  exportButton.classList.toggle("is-busy", state.isLoading || state.isExporting);
+  exportButton.setAttribute("aria-disabled", String(!canExport));
+  exportButton.dataset.state = state.isExporting ? "exporting" : state.isLoading ? "loading" : canExport ? "ready" : "idle";
 }
 
 function triggerBlobDownload(blob: Blob, filename: string): Promise<number> {
@@ -461,5 +470,15 @@ function isHttpUrl(url: string): boolean {
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
+  }
+}
+
+function urlsMatch(left: string, right: string): boolean {
+  try {
+    const leftUrl = new URL(left);
+    const rightUrl = new URL(right);
+    return leftUrl.href === rightUrl.href;
+  } catch {
+    return left.trim() === right.trim();
   }
 }

@@ -1,3 +1,4 @@
+import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, convertInchesToTwip, ImageRun } from "docx";
 import type { ArticleData, ExportFormat } from "../types/index";
@@ -11,6 +12,90 @@ interface ExportPayload {
 
 interface BuildExportOptions {
   baseFileName: string;
+}
+
+const DOCX_FONT_FAMILY = "Arial Unicode MS";
+const DOCX_CODE_FONT_FAMILY = "Menlo";
+const PDF_UNICODE_FONT_PATH = "assets/fonts/ArialUnicode.ttf";
+
+let pdfUnicodeFontBytesPromise: Promise<Uint8Array> | null = null;
+
+function getTextContentPreservingBreaks(element: HTMLElement): string {
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
+  return (clone.textContent ?? "").replace(/\r\n?/g, "\n").trim();
+}
+
+async function loadPdfUnicodeFontBytes(): Promise<Uint8Array> {
+  if (!pdfUnicodeFontBytesPromise) {
+    pdfUnicodeFontBytesPromise = (async () => {
+      const fontUrl = chrome.runtime.getURL(PDF_UNICODE_FONT_PATH);
+      const response = await fetch(fontUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to load bundled PDF font: ${response.status}`);
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    })();
+  }
+
+  return pdfUnicodeFontBytesPromise;
+}
+
+function tokenizeForLineWrap(text: string, measureWidth: (value: string) => number, maxWidth: number): string[] {
+  const chunks = text.split(/(\s+)/).filter(Boolean);
+  const tokens: string[] = [];
+
+  for (const chunk of chunks) {
+    if (/^\s+$/.test(chunk)) {
+      tokens.push(chunk);
+      continue;
+    }
+
+    if (measureWidth(chunk) <= maxWidth) {
+      tokens.push(chunk);
+      continue;
+    }
+
+    tokens.push(...Array.from(chunk));
+  }
+
+  return tokens;
+}
+
+function wrapTextIntoLines(text: string, measureWidth: (value: string) => number, maxWidth: number): string[] {
+  const rawLines = text.replace(/\r\n?/g, "\n").split("\n");
+  const lines: string[] = [];
+
+  for (const rawLine of rawLines) {
+    if (rawLine.length === 0) {
+      lines.push("");
+      continue;
+    }
+
+    const tokens = tokenizeForLineWrap(rawLine, measureWidth, maxWidth);
+    let currentLine = "";
+
+    for (const token of tokens) {
+      const candidateLine = currentLine ? `${currentLine}${token}` : token;
+      if (currentLine && measureWidth(candidateLine) > maxWidth) {
+        lines.push(currentLine.replace(/\s+$/u, ""));
+        currentLine = /^\s+$/u.test(token) ? "" : token;
+        continue;
+      }
+
+      if (!currentLine && measureWidth(token) > maxWidth) {
+        lines.push(token);
+        currentLine = "";
+        continue;
+      }
+
+      currentLine = candidateLine;
+    }
+
+    lines.push(currentLine.replace(/\s+$/u, ""));
+  }
+
+  return lines;
 }
 
 export async function buildExportPayloads(
@@ -101,7 +186,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
           text: article.title,
           bold: true,
           size: 32, // 16pt (size is in half-points)
-          font: "Times New Roman",
+          font: DOCX_FONT_FAMILY,
         }),
       ],
       heading: HeadingLevel.TITLE,
@@ -121,7 +206,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
             text: `作者：${article.byline}`,
             italics: true,
             size: 22, // 11pt
-            font: "Times New Roman",
+            font: DOCX_FONT_FAMILY,
           }),
         ],
         alignment: AlignmentType.CENTER,
@@ -147,7 +232,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
               new TextRun({
                 text: text,
                 size: 24, // 12pt
-                font: "Times New Roman",
+                font: DOCX_FONT_FAMILY,
               }),
             ],
             spacing: {
@@ -180,7 +265,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                   text: element.textContent || '',
                   bold: true,
                   size: headingSize,
-                  font: "Times New Roman",
+                  font: DOCX_FONT_FAMILY,
                 }),
               ],
               heading: headingLevel <= 3 ? [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][headingLevel - 1] : undefined,
@@ -201,7 +286,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                   new TextRun({
                     text: pText,
                     size: 24, // 12pt
-                    font: "Times New Roman",
+                    font: DOCX_FONT_FAMILY,
                   }),
                 ],
                 spacing: {
@@ -214,6 +299,34 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                 },
               })
             );
+          }
+          break;
+
+        case 'pre':
+          const codeText = getTextContentPreservingBreaks(element as HTMLElement);
+          if (codeText) {
+            for (const line of codeText.split("\n")) {
+              paragraphs.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: line || " ",
+                      size: 20,
+                      font: DOCX_CODE_FONT_FAMILY,
+                    }),
+                  ],
+                  spacing: {
+                    before: 40,
+                    after: 40,
+                    line: 300,
+                  },
+                  indent: {
+                    left: convertInchesToTwip(0.3),
+                    right: convertInchesToTwip(0.1),
+                  },
+                })
+              );
+            }
           }
           break;
           
@@ -247,7 +360,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                         width: 400, // 限制宽度
                         height: 300, // 限制高度
                       },
-                      type: "jpg", // 指定图片类型
+                      type: imageType as "jpg" | "png" | "gif", // 指定图片类型
                     })
                   ],
                   alignment: AlignmentType.CENTER,
@@ -267,7 +380,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                         text: imgElement.alt,
                         italics: true,
                         size: 20, // 10pt
-                        font: "Times New Roman",
+                        font: DOCX_FONT_FAMILY,
                       }),
                     ],
                     alignment: AlignmentType.CENTER,
@@ -290,7 +403,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                     text: `[图片无法加载: ${imgElement.alt || imgSrc}]`,
                     italics: true,
                     size: 22, // 11pt
-                    font: "Times New Roman",
+                    font: DOCX_FONT_FAMILY,
                   }),
                 ],
                 alignment: AlignmentType.CENTER,
@@ -313,7 +426,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                     text: quoteText,
                     italics: true,
                     size: 22, // 11pt
-                    font: "Times New Roman",
+                    font: DOCX_FONT_FAMILY,
                   }),
                 ],
                 spacing: {
@@ -339,7 +452,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
                   new TextRun({
                     text: `• ${liText}`,
                     size: 24, // 12pt
-                    font: "Times New Roman",
+                    font: DOCX_FONT_FAMILY,
                   }),
                 ],
                 spacing: {
@@ -375,17 +488,16 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
 
 async function buildPdf(article: ArticleData): Promise<Blob> {
   const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
   
-  // 使用支持中文的字体 - Times Roman 对中文支持更好
-  // 或者可以考虑嵌入中文字体文件
-  let font, bold;
+  let font;
+  let bold;
   try {
-    // 尝试使用 Times Roman，它对 Unicode 字符支持更好
-    font = await pdf.embedFont(StandardFonts.TimesRoman);
-    bold = await pdf.embedFont(StandardFonts.TimesRomanBold);
+    const unicodeFontBytes = await loadPdfUnicodeFontBytes();
+    font = await pdf.embedFont(unicodeFontBytes, { subset: true });
+    bold = font;
   } catch (error) {
-    // 如果失败，回退到基础字体，但需要过滤掉不支持的字符
-    console.warn("无法嵌入 Times Roman 字体，使用 Helvetica 替代:", error);
+    console.warn("无法嵌入 Unicode 字体，使用基础字体回退:", error);
     font = await pdf.embedFont(StandardFonts.Helvetica);
     bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   }
@@ -397,7 +509,7 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
   let cursorY = height - margin;
 
   const ensureCursor = (lineHeight: number, fontSize: number) => {
-    if (cursorY <= margin) {
+    if (cursorY - fontSize * lineHeight <= margin) {
       page = pdf.addPage();
       ({ width, height } = page.getSize());
       cursorY = height - margin;
@@ -437,37 +549,27 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
     text: string,
     options: { fontSize?: number; lineHeight?: number; bold?: boolean } = {}
   ) => {
+    if (!text.trim()) {
+      cursorY -= (options.fontSize ?? 12) * 0.6;
+      return;
+    }
+
     const fontSize = options.fontSize ?? 12;
     const lineHeight = options.lineHeight ?? 1.4;
     const activeFont = options.bold ? bold : font;
     
     // 清理文本，确保字体支持
     const cleanText = sanitizeText(text, activeFont);
-    const words = cleanText.split(/\s+/);
-    let line = "";
+    const availableWidth = width - margin * 2;
+    const lines = wrapTextIntoLines(
+      cleanText,
+      value => activeFont.widthOfTextAtSize(value, fontSize),
+      availableWidth
+    );
 
-    for (const word of words) {
-      const testLine = line ? `${line} ${word}` : word;
-      const textWidth = activeFont.widthOfTextAtSize(testLine, fontSize);
-      if (textWidth > width - margin * 2 && line) {
-        ensureCursor(lineHeight, fontSize);
-        page.drawText(line, {
-          x: margin,
-          y: cursorY,
-          size: fontSize,
-          font: activeFont,
-          color: rgb(0.1, 0.1, 0.1)
-        });
-        cursorY -= fontSize * lineHeight;
-        line = word;
-      } else {
-        line = testLine;
-      }
-    }
-
-    if (line) {
+    for (const line of lines) {
       ensureCursor(lineHeight, fontSize);
-      page.drawText(line, {
+      page.drawText(line || " ", {
         x: margin,
         y: cursorY,
         size: fontSize,

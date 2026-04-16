@@ -11,6 +11,13 @@ type SerializedSubstackRuntimeArticle = {
   bodyHtml: string;
 };
 
+type SerializedChatGptConversation = {
+  title?: string;
+  excerpt?: string | null;
+  bodyHtml: string;
+  language?: string | null;
+};
+
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
@@ -250,38 +257,63 @@ function absolutifyUrl(url: string, baseUrl: string): string {
 }
 
 /**
+ * 清理微信公众号图片 URL，移除导致水印/追踪的参数。
+ * data-src 通常只有 wx_fmt，而浏览器渲染后的 src 会被微信 JS 注入
+ * tp=wxpic、wxfrom、wx_lazy、wx_co 等参数，这些参数会触发 CDN 添加水印。
+ */
+function cleanWeChatImageUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!isWeChatImageHost(parsed.hostname)) {
+      return url;
+    }
+    const paramsToRemove = ["tp", "wxfrom", "wx_lazy", "wx_co", "retryload", "watermark"];
+    for (const param of paramsToRemove) {
+      parsed.searchParams.delete(param);
+    }
+    // 移除 hash fragment（如 #imgIndex=0）
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isWeChatImageHost(hostname: string): boolean {
+  return hostname.includes("mmbiz.qpic.cn") || hostname.includes("mmbiz.qlogo.cn");
+}
+
+/**
+ * 通过 images.weserv.nl 代理微信图片，绕过防盗链和水印。
+ * 微信 CDN 会根据 Referer 等请求上下文决定是否添加水印，
+ * 代理服务以无上下文方式请求原始图片，从而获取无水印版本。
+ */
+function proxyWeChatImageUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!isWeChatImageHost(parsed.hostname)) {
+      return url;
+    }
+    const encodedUrl = encodeURIComponent(url);
+    let proxyUrl = `https://images.weserv.nl/?url=${encodedUrl}`;
+    // GIF 图片保留动画帧
+    if (url.toLowerCase().includes("wx_fmt=gif") || url.toLowerCase().includes("/mmbiz_gif/")) {
+      proxyUrl += "&n=-1";
+    }
+    return proxyUrl;
+  } catch {
+    return url;
+  }
+}
+
+/**
  * 从 img 元素获取最佳图片 URL。
- * 优先使用明确的 src，避免某些 CDN（如 Substack）在 srcset URL 中自带逗号时被错误拆分。
+ * 优先使用 data-* 属性（懒加载原始 URL），避免浏览器渲染后 src 被注入水印/追踪参数
+ * （如微信公众号的 tp=wxpic&wxfrom=5 等）。
+ * srcset 放在最后，避免某些 CDN（如 Substack）在 srcset URL 中自带逗号时被错误拆分。
  */
 function getImageSource(el: HTMLImageElement, baseUrl: string): string | null {
-  // 1. 优先使用 src
-  const src = el.getAttribute("src");
-  if (src) {
-    const resolved = absolutifyUrl(src, baseUrl);
-    if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
-      return resolved;
-    }
-    if (!resolved.startsWith("(") && !resolved.includes("nonexistent") && !resolved.includes("undefined")) {
-      return resolved;
-    }
-  }
-
-  // 2. 再尝试从 srcset 获取最佳图片（最高分辨率）
-  const srcset = el.getAttribute("srcset");
-  if (srcset) {
-    const candidates = parseSrcset(srcset);
-    if (candidates.length > 0) {
-      // 选择最高分辨率的图片
-      const best = candidates.reduce((max, curr) =>
-        (curr.width || curr.density || 0) > (max.width || max.density || 0) ? curr : max
-      );
-      if (best.url) {
-        return absolutifyUrl(best.url, baseUrl);
-      }
-    }
-  }
-
-  // 3. 尝试常见的 data-* 属性（按优先级排序）
+  // 1. 优先使用 data-* 属性（懒加载场景下保存的是原始干净 URL）
   const dataSrc = (
     el.getAttribute("data-src") ||
     el.getAttribute("data-original") ||
@@ -299,13 +331,37 @@ function getImageSource(el: HTMLImageElement, baseUrl: string): string | null {
 
   if (dataSrc) {
     const resolved = absolutifyUrl(dataSrc, baseUrl);
-    // 如果是有效的 URL 则返回
     if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
       return resolved;
     }
-    // 如果是相对路径，也返回
     if (!resolved.startsWith("(") && !resolved.includes("nonexistent") && !resolved.includes("undefined")) {
       return resolved;
+    }
+  }
+
+  // 2. 回退到 src 属性
+  const src = el.getAttribute("src");
+  if (src) {
+    const resolved = absolutifyUrl(src, baseUrl);
+    if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
+      return resolved;
+    }
+    if (!resolved.startsWith("(") && !resolved.includes("nonexistent") && !resolved.includes("undefined")) {
+      return resolved;
+    }
+  }
+
+  // 3. 最后尝试 srcset（放最后避免 Substack 等 CDN 的逗号解析问题）
+  const srcset = el.getAttribute("srcset");
+  if (srcset) {
+    const candidates = parseSrcset(srcset);
+    if (candidates.length > 0) {
+      const best = candidates.reduce((max, curr) =>
+        (curr.width || curr.density || 0) > (max.width || max.density || 0) ? curr : max
+      );
+      if (best.url) {
+        return absolutifyUrl(best.url, baseUrl);
+      }
     }
   }
 
@@ -509,6 +565,37 @@ function buildSubstackArticleFromSerializedPayload(
   };
 }
 
+function buildChatGptConversationFromSerializedPayload(
+  documentRef: Document,
+  sourceUrl: string,
+  payload: SerializedChatGptConversation
+): Omit<ArticleData, "fetchedAt"> | null {
+  const tempContainer = documentRef.createElement("div");
+  tempContainer.innerHTML = payload.bodyHtml;
+  tempContainer.querySelectorAll("script, style, noscript").forEach(node => node.remove());
+
+  const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
+  const textContent = tempContainer.textContent?.trim() ?? "";
+  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+    return null;
+  }
+
+  const fallbackTitle = sourceUrl.includes("/share/")
+    ? "ChatGPT Shared Conversation"
+    : "ChatGPT Conversation";
+
+  return {
+    url: sourceUrl,
+    title: payload.title?.trim() || documentRef.title || fallbackTitle,
+    byline: "ChatGPT",
+    excerpt: payload.excerpt ?? undefined,
+    contentHtml: tempContainer.innerHTML,
+    textContent,
+    images: dedupeImages(images),
+    language: payload.language || documentRef.documentElement.lang || undefined
+  };
+}
+
 function extractSubstackCanonicalUrl(documentRef: Document, sourceUrl: string): string | null {
   const preloads = extractSubstackPreloads(documentRef);
   if (preloads) {
@@ -539,6 +626,19 @@ function shouldResolveCanonicalSourceUrl(currentUrl: string, canonicalUrl: strin
 
 function getPreferredArticleUrl(currentUrl: string, canonicalUrl: string | null): string {
   return shouldResolveCanonicalSourceUrl(currentUrl, canonicalUrl) ? canonicalUrl : currentUrl;
+}
+
+function isChatGptHost(hostname: string): boolean {
+  return hostname === "chatgpt.com" || hostname === "chat.openai.com";
+}
+
+function isChatGptConversationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isChatGptHost(parsed.hostname) && (parsed.pathname.startsWith("/c/") || parsed.pathname.startsWith("/share/"));
+  } catch {
+    return false;
+  }
 }
 
 function scoreContentCandidate(element: Element): number {
@@ -620,6 +720,8 @@ function scoreContentCandidate(element: Element): number {
 
 function findBestContentContainer(documentRef: Document): Element | null {
   const selectors = [
+    "#js_content",                 // 微信公众号正文容器
+    ".rich_media_content",         // 微信公众号正文 class
     ".available-content .body.markup",
     ".available-content .markup",
     ".available-content",
@@ -812,6 +914,10 @@ function sanitizeContent(container: HTMLElement, baseUrl: string): ImageAsset[] 
         continue;
       }
 
+      // 清理微信图片 URL 中的水印/追踪参数，然后通过代理绕过防盗链
+      source = cleanWeChatImageUrl(source);
+      source = proxyWeChatImageUrl(source);
+
       el.src = source;
       el.removeAttribute("srcset");
       el.removeAttribute("data-src");
@@ -852,8 +958,270 @@ function sanitizeContent(container: HTMLElement, baseUrl: string): ImageAsset[] 
  */
 async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleData> {
   try {
+    // 对于微信公众号文章，通过原始 HTTP 请求获取未被 JS 修改的图片 URL。
+    // 微信的页面 JS 会在浏览器中将 data-src 中的图片路径替换为完全不同的
+    // 带水印版本（不同的 CDN 路径），因此从 DOM 中读取的 data-src 已经不是原始值。
+    // 直接 fetch 原始 HTML 可以拿到未被修改的 data-src，从而获取无水印图片。
+    const isWeChatArticle = (() => {
+      try {
+        return new URL(url).hostname === "mp.weixin.qq.com";
+      } catch {
+        return false;
+      }
+    })();
+
+    let rawWeChatImageUrls: string[] = [];
+    if (isWeChatArticle) {
+      try {
+        // 在页面上下文中执行 fetch，自动带上浏览器的 cookies 和请求头
+        const rawResults = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: async () => {
+            try {
+              const resp = await fetch(location.href, { cache: "no-store" });
+              if (!resp.ok) return [];
+              const html = await resp.text();
+              // 使用 DOMParser 精确解析，只从文章正文容器中提取图片
+              const rawDoc = new DOMParser().parseFromString(html, "text/html");
+              const contentEl = rawDoc.querySelector("#js_content") || rawDoc.querySelector(".rich_media_content");
+              if (!contentEl) return [];
+              const imgs = contentEl.querySelectorAll("img[data-src]");
+              const urls: string[] = [];
+              imgs.forEach(img => {
+                const ds = img.getAttribute("data-src");
+                if (ds && (ds.includes("mmbiz.qpic.cn") || ds.includes("mmbiz.qlogo.cn"))) {
+                  urls.push(ds);
+                }
+              });
+              return urls;
+            } catch {
+              return [];
+            }
+          }
+        });
+        rawWeChatImageUrls = (rawResults?.[0]?.result as string[] | undefined) ?? [];
+        console.log(`从微信原始 HTML 提取到 ${rawWeChatImageUrls.length} 个原始图片 URL`);
+      } catch (error) {
+        console.warn("获取微信原始图片 URL 失败:", error);
+      }
+    }
+
     // 等待一小段时间让图片完全加载（针对懒加载图片）
     await new Promise(resolve => setTimeout(resolve, 1000));
+
+    if (isChatGptConversationUrl(url)) {
+      const chatResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const normalizeText = (value: string | null | undefined) =>
+            (value ?? "").replace(/\r\n?/g, "\n").replace(/\u00A0/g, " ").trim();
+
+          const collectRoots = () => {
+            const roots: ParentNode[] = [document];
+            const queue: ParentNode[] = [document];
+            const seen = new Set<ParentNode>([document]);
+
+            while (queue.length > 0) {
+              const root = queue.shift();
+              if (!root || typeof (root as ParentNode).querySelectorAll !== "function") {
+                continue;
+              }
+
+              const elements = Array.from(root.querySelectorAll("*"));
+              for (const element of elements) {
+                if (element.shadowRoot && !seen.has(element.shadowRoot)) {
+                  seen.add(element.shadowRoot);
+                  roots.push(element.shadowRoot);
+                  queue.push(element.shadowRoot);
+                }
+              }
+            }
+
+            return roots;
+          };
+
+          const isSameTurnDescendant = (candidate: Element, turn: HTMLElement) => {
+            const closest = candidate.closest("[data-message-author-role]");
+            return !closest || closest === turn;
+          };
+
+          const scoreContentNode = (candidate: HTMLElement) => {
+            const textLength = normalizeText(candidate.innerText || candidate.textContent).length;
+            const paragraphCount = candidate.querySelectorAll("p").length;
+            const codeCount = candidate.querySelectorAll("pre, code").length;
+            const listCount = candidate.querySelectorAll("li").length;
+            const imageCount = candidate.querySelectorAll("img").length;
+            return textLength + paragraphCount * 180 + codeCount * 220 + listCount * 90 + imageCount * 60;
+          };
+
+          const findTurnContent = (turn: HTMLElement) => {
+            const selectors = [
+              '[data-testid="conversation-turn-content"]',
+              '[data-message-id]',
+              '.markdown',
+              '[class*="markdown"]',
+              '.prose',
+              '[class*="prose"]',
+              'pre',
+              'p',
+              'ol',
+              'ul',
+              'table',
+              '[dir="auto"]'
+            ];
+
+            const candidates: HTMLElement[] = [];
+            for (const selector of selectors) {
+              const matches = turn.matches(selector) ? [turn] : [];
+              const descendants = Array.from(turn.querySelectorAll<HTMLElement>(selector))
+                .filter(candidate => isSameTurnDescendant(candidate, turn));
+              for (const match of [...matches, ...descendants]) {
+                if (!candidates.includes(match)) {
+                  candidates.push(match);
+                }
+              }
+            }
+
+            candidates.sort((left, right) => scoreContentNode(right) - scoreContentNode(left));
+            return candidates[0] ?? turn;
+          };
+
+          const sanitizeTurnClone = (source: HTMLElement) => {
+            const clone = source.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll(
+              "button, textarea, input, select, form, nav, aside, footer, canvas, svg, audio, video"
+            ).forEach(node => node.remove());
+
+            clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach(node => {
+              node.removeAttribute("contenteditable");
+            });
+
+            clone.querySelectorAll<HTMLElement>("[aria-hidden='true']").forEach(node => {
+              if (!node.querySelector("img") && normalizeText(node.textContent).length === 0) {
+                node.remove();
+              }
+            });
+
+            const hasStructuredContent = !!clone.querySelector(
+              "p, pre, ul, ol, li, table, blockquote, h1, h2, h3, h4, h5, h6, img"
+            );
+
+            if (!hasStructuredContent) {
+              const text = normalizeText(source.innerText || source.textContent);
+              clone.innerHTML = "";
+
+              const paragraphs = text
+                .split(/\n{2,}/)
+                .map(part => part.trim())
+                .filter(Boolean);
+
+              for (const paragraphText of paragraphs) {
+                const paragraph = document.createElement("p");
+                paragraph.textContent = paragraphText;
+                clone.appendChild(paragraph);
+              }
+            }
+
+            return clone;
+          };
+
+          const roots = collectRoots();
+          const turns: HTMLElement[] = [];
+          const seen = new Set<HTMLElement>();
+
+          for (const root of roots) {
+            const matches = Array.from(root.querySelectorAll<HTMLElement>("[data-message-author-role]"));
+            for (const match of matches) {
+              const role = match.getAttribute("data-message-author-role");
+              if (role !== "user" && role !== "assistant") {
+                continue;
+              }
+
+              const parentRoleNode = match.parentElement?.closest("[data-message-author-role]");
+              if (parentRoleNode) {
+                continue;
+              }
+
+              if (!seen.has(match)) {
+                seen.add(match);
+                turns.push(match);
+              }
+            }
+          }
+
+          if (turns.length === 0) {
+            return null;
+          }
+
+          const article = document.createElement("article");
+          let firstUserText = "";
+          let firstAssistantText = "";
+
+          for (const turn of turns) {
+            const role = turn.getAttribute("data-message-author-role") ?? "assistant";
+            const source = findTurnContent(turn);
+            const clone = sanitizeTurnClone(source);
+            const text = normalizeText(clone.innerText || clone.textContent);
+            const hasImage = !!clone.querySelector("img");
+
+            if (!text && !hasImage) {
+              continue;
+            }
+
+            if (!firstUserText && role === "user") {
+              firstUserText = text;
+            }
+            if (!firstAssistantText && role === "assistant") {
+              firstAssistantText = text;
+            }
+
+            const section = document.createElement("section");
+            section.setAttribute("data-chatgpt-role", role);
+
+            const heading = document.createElement("h2");
+            heading.textContent = role === "user" ? "User" : "Assistant";
+            section.appendChild(heading);
+
+            if (clone.childNodes.length > 0) {
+              section.append(...Array.from(clone.childNodes));
+            } else if (text) {
+              const paragraph = document.createElement("p");
+              paragraph.textContent = text;
+              section.appendChild(paragraph);
+            }
+
+            article.appendChild(section);
+          }
+
+          const titleFromDocument = (document.title || "")
+            .replace(/\s*[-|]\s*ChatGPT\s*$/i, "")
+            .trim();
+
+          const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : "ChatGPT Conversation";
+          const excerptSource = firstAssistantText || firstUserText;
+
+          return {
+            title: titleFromDocument || fallbackTitle,
+            excerpt: excerptSource ? excerptSource.slice(0, 220) : null,
+            bodyHtml: article.innerHTML,
+            language: document.documentElement.lang || null
+          };
+        }
+      });
+
+      const chatPayload = chatResults?.[0]?.result as SerializedChatGptConversation | null | undefined;
+      if (chatPayload?.bodyHtml) {
+        const chatDoc = new DOMParser().parseFromString("<!DOCTYPE html><html><head></head><body></body></html>", "text/html");
+        const chatArticle = buildChatGptConversationFromSerializedPayload(chatDoc, url, chatPayload);
+        if (chatArticle) {
+          console.log(`从 ChatGPT 标签页提取正文：${chatArticle.images.length} 张图片，${chatArticle.textContent.length} 字符`);
+          return {
+            ...chatArticle,
+            fetchedAt: Date.now()
+          };
+        }
+      }
+    }
 
     const isSubstackWrapperUrl = (() => {
       try {
@@ -1128,6 +1496,8 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
         const findDeepArticleCandidate = () => {
           const selectors = [
+            "#js_content",                 // 微信公众号正文容器
+            ".rich_media_content",         // 微信公众号正文 class
             ".available-content .body.markup",
             ".available-content .markup",
             ".available-content",
@@ -1330,19 +1700,49 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
     const imgSrcMap = new Map<string, string>();
 
     // 构建图片 src 映射（从标签页获取的完整信息）
+    // 清理微信图片 URL 水印参数并通过代理绕过防盗链
     imageStates.forEach(img => {
       if (img.src && img.complete && img.naturalWidth > 0) {
-        imgSrcMap.set(img.src, img.currentSrc || img.src);
+        const cleaned = cleanWeChatImageUrl(img.currentSrc || img.src);
+        imgSrcMap.set(img.src, proxyWeChatImageUrl(cleaned));
       }
     });
 
-    // 更新图片 src
-    imgElements.forEach(img => {
-      const src = img.getAttribute("src");
-      if (src && imgSrcMap.has(src)) {
-        img.setAttribute("src", imgSrcMap.get(src)!);
-      }
-    });
+    // 对于微信文章：使用从原始 HTML 获取的未被 JS 修改的图片 URL
+    // 微信的页面 JS 会将 data-src 替换为完全不同的带水印 CDN 路径，
+    // 因此 DOM 中的 data-src 已经不可靠，必须用原始 HTML 中的值
+    if (rawWeChatImageUrls.length > 0) {
+      let rawUrlIndex = 0;
+      imgElements.forEach(img => {
+        const dataSrc = img.getAttribute("data-src");
+        const src = img.getAttribute("src");
+        // 只替换微信图片（通过检查 data-src 或 src 是否指向微信 CDN）
+        const currentUrl = dataSrc || src || "";
+        if (currentUrl.includes("mmbiz.qpic.cn") || currentUrl.includes("mmbiz.qlogo.cn")) {
+          if (rawUrlIndex < rawWeChatImageUrls.length) {
+            const originalUrl = rawWeChatImageUrls[rawUrlIndex];
+            const cleaned = cleanWeChatImageUrl(originalUrl);
+            img.setAttribute("src", proxyWeChatImageUrl(cleaned));
+            // 同时更新 data-src 以确保后续处理一致
+            img.setAttribute("data-src", originalUrl);
+            rawUrlIndex++;
+          }
+        }
+      });
+      console.log(`已用原始 URL 替换 ${rawUrlIndex} 张微信图片`);
+    } else {
+      // 非微信文章或获取原始 HTML 失败时的回退逻辑
+      imgElements.forEach(img => {
+        const src = img.getAttribute("src");
+        const dataSrc = img.getAttribute("data-src");
+        if (dataSrc) {
+          const cleaned = cleanWeChatImageUrl(dataSrc);
+          img.setAttribute("src", proxyWeChatImageUrl(cleaned));
+        } else if (src && imgSrcMap.has(src)) {
+          img.setAttribute("src", imgSrcMap.get(src)!);
+        }
+      });
+    }
 
     // 运行 sanitizeContent 来处理图片和其他清理工作
     let images = sanitizeContent(tempContainer as HTMLElement, preferredUrl);
@@ -1483,6 +1883,8 @@ function isDynamicContentSite(url: string): boolean {
     'medium.com',
     'twitter.com',
     'x.com',
+    'chatgpt.com',
+    'chat.openai.com',
     'linkedin.com',
     'indiehackers.com',
     'producthunt.com',
@@ -1519,7 +1921,7 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
 
 请先在浏览器中打开该页面，等待内容完全加载后，再点击扩展图标进行提取。
 
-支持动态加载的网站：Substack, Medium, Twitter/X, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
+支持动态加载的网站：Substack, Medium, Twitter/X, ChatGPT, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
     }
   }
 
