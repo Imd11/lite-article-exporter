@@ -226,14 +226,14 @@ input[type="search"]:focus {
   gap: 8px;
   min-height: 56px;
   padding: 10px 11px 10px 9px;
-  border: 1px solid rgba(89, 73, 57, 0.1);
+  border: 1px solid rgba(89, 73, 57, 0.13);
   border-radius: 20px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.56)),
-    var(--panel-tint);
+    linear-gradient(180deg, rgba(251, 246, 239, 0.96), rgba(241, 233, 223, 0.82)),
+    rgba(239, 229, 217, 0.5);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    var(--shadow-sm);
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 8px 16px rgba(36, 28, 20, 0.055);
   cursor: pointer;
   transition:
     transform 0.2s ease,
@@ -244,10 +244,13 @@ input[type="search"]:focus {
 
 .option-tile:hover {
   transform: translateY(-1px);
-  border-color: rgba(89, 73, 57, 0.18);
+  border-color: rgba(89, 73, 57, 0.2);
+  background:
+    linear-gradient(180deg, rgba(253, 248, 242, 0.98), rgba(244, 236, 227, 0.88)),
+    rgba(242, 232, 221, 0.54);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.94),
-    var(--shadow-lg);
+    0 12px 22px rgba(36, 28, 20, 0.075);
 }
 
 .option-tile input {
@@ -266,11 +269,11 @@ input[type="search"]:focus {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(89, 73, 57, 0.08);
+  border: 1px solid rgba(89, 73, 57, 0.1);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.46)),
-    rgba(255, 255, 255, 0.36);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 240, 232, 0.7)),
+    rgba(249, 242, 235, 0.48);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84);
   font-size: 13px;
 }
@@ -294,9 +297,9 @@ input[type="search"]:focus {
   position: relative;
   width: 18px;
   height: 18px;
-  border: 1.5px solid rgba(89, 73, 57, 0.22);
+  border: 1.5px solid rgba(89, 73, 57, 0.28);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 250, 245, 0.84);
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
