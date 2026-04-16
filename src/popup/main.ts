@@ -63,10 +63,13 @@ function renderUI() {
   </section>
   <section class="section" id="preview-section" hidden>
     <div class="summary">
+      <div class="summary-chips">
+        <span class="summary-chip" id="article-domain"></span>
+        <span class="summary-chip" id="article-stats"></span>
+      </div>
       <h2 id="article-title"></h2>
       <p id="article-meta"></p>
       <p id="article-excerpt"></p>
-      <p id="article-stats"></p>
     </div>
   </section>
   <section class="history card" id="history-section">
@@ -92,9 +95,10 @@ const historyList = document.getElementById("history-list") as HTMLDivElement;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
 const articleTitleEl = document.getElementById("article-title") as HTMLHeadingElement;
+const articleDomainEl = document.getElementById("article-domain") as HTMLSpanElement;
 const articleMetaEl = document.getElementById("article-meta") as HTMLParagraphElement;
 const articleExcerptEl = document.getElementById("article-excerpt") as HTMLParagraphElement;
-const articleStatsEl = document.getElementById("article-stats") as HTMLParagraphElement;
+const articleStatsEl = document.getElementById("article-stats") as HTMLSpanElement;
 const previewSection = document.getElementById("preview-section") as HTMLDivElement;
 
 exportButton.disabled = true;
@@ -302,12 +306,12 @@ function getSelectedFormats(): ExportFormat[] {
 }
 
 function renderArticle(article: ArticleData) {
+  const hostname = getHostname(article.url);
   articleTitleEl.textContent = article.title;
-  const metaParts: string[] = [];
-  if (article.byline) metaParts.push(t("articleMetaAuthorLine", article.byline));
-  metaParts.push(t("articleMetaSourceLine", new URL(article.url).hostname));
-  articleMetaEl.textContent = metaParts.join(" · ");
-  articleExcerptEl.textContent = article.excerpt || article.textContent.slice(0, 120);
+  articleDomainEl.textContent = hostname;
+  articleMetaEl.textContent = article.byline ? t("articleMetaAuthorLine", article.byline) : "";
+  articleMetaEl.hidden = !article.byline;
+  articleExcerptEl.textContent = (article.excerpt || article.textContent).slice(0, 140);
   const wordCount = Math.round(article.textContent.length / 2).toLocaleString();
   const imageCount = article.images.length.toLocaleString();
   articleStatsEl.textContent = t("articleStatsLine", [wordCount, imageCount]);
@@ -336,6 +340,28 @@ function escapeHtmlInline(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function getHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function formatHistoryTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const sameYear = date.getFullYear() === now.getFullYear();
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "numeric",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function renderHistory() {
   const keyword = state.historyFilter.trim().toLowerCase();
   const filtered = state.history.filter(record => {
@@ -354,22 +380,31 @@ function renderHistory() {
 
   historyList.innerHTML = filtered
     .map(record => {
-      const date = new Date(record.timestamp);
+      const dateLabel = formatHistoryTimestamp(record.timestamp);
       const formatText = record.formats.map(getFormatLabel).join(" · ");
       const statusText = record.status === "success" ? t("historyStatusSuccess") : t("historyStatusError");
-      const statusClass = record.status === "success" ? "" : "status error";
+      const statusClass = record.status === "success" ? "success" : "error";
       const safeTitle = escapeHtmlInline(record.title);
       const safeUrl = escapeHtmlInline(record.url);
-      const link = `<a href="${safeUrl}" target="_blank" rel="noreferrer">${safeUrl}</a>`;
-      const errorText = record.errorMessage ? ` - ${escapeHtmlInline(record.errorMessage)}` : "";
+      const safeHost = escapeHtmlInline(getHostname(record.url));
+      const safeDateLabel = escapeHtmlInline(dateLabel);
+      const safeFormatText = escapeHtmlInline(formatText);
+      const errorText = record.errorMessage
+        ? `<p class="history-item-error">${escapeHtmlInline(record.errorMessage)}</p>`
+        : "";
       return `
-        <div class="history-item">
-          <strong>${safeTitle}</strong>
-          <span>${date.toLocaleString()}</span>
-          <span>${t("historyFormatValue", formatText)}</span>
-          <span class="${statusClass}">${statusText}${errorText}</span>
-          <span class="history-link">${link}</span>
-        </div>
+        <a class="history-item" href="${safeUrl}" target="_blank" rel="noreferrer">
+          <div class="history-item-top">
+            <strong>${safeTitle}</strong>
+            <span class="history-status-pill ${statusClass}">${statusText}</span>
+          </div>
+          <div class="history-item-meta">
+            <span class="history-meta-pill">${safeHost}</span>
+            <span class="history-meta-pill">${safeFormatText}</span>
+            <span class="history-meta-pill">${safeDateLabel}</span>
+          </div>
+          ${errorText}
+        </a>
       `;
     })
     .join("");
