@@ -1347,11 +1347,21 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
           const isUserRoleText = (text: string) => /^你说$/i.test(text) || /^You said$/i.test(text);
           const isAssistantRoleText = (text: string) => /^Gemini\s*说$/i.test(text) || /^Gemini said$/i.test(text);
+          const isCustomAssistantRoleText = (text: string) => {
+            if (!text || isUserRoleText(text) || isAssistantRoleText(text)) {
+              return false;
+            }
+
+            return (
+              /^[\p{Script=Han}\p{Letter}\p{Number}][\p{Script=Han}\p{Letter}\p{Number}\s._-]{0,31}\s*说$/u.test(text) ||
+              /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s._-]{0,31}\s+said$/iu.test(text)
+            );
+          };
           const matchRole = (text: string): ConversationRole | null => {
             if (isUserRoleText(text)) {
               return "user";
             }
-            if (isAssistantRoleText(text)) {
+            if (isAssistantRoleText(text) || isCustomAssistantRoleText(text)) {
               return "assistant";
             }
             return null;
@@ -1364,6 +1374,12 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             /^升级到 Google AI(?: Plus| Pro)?$/i,
             /^Upgrade to Google AI(?: Plus| Pro)?$/i,
             /^Google AI (?:Plus| Pro)$/i,
+            /^自定义 Gem$/i,
+            /^Custom Gem$/i,
+            /^显示思路$/i,
+            /^Show thinking$/i,
+            /^导出到 Google 表格$/i,
+            /^Export to Google Sheets$/i,
             /^工具$/i,
             /^Tools$/i,
             /^Pro$/i
@@ -1378,6 +1394,61 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
           const isNoiseText = (text: string) =>
             exactNoisePatterns.some(pattern => pattern.test(text)) || blockNoisePatterns.some(pattern => pattern.test(text));
+
+          const cleanDocumentTitle = (value: string | null | undefined) =>
+            normalizeText(value)
+              .replace(/\s*[-|]\s*(?:Google\s+)?Gemini\s*$/i, "")
+              .trim();
+
+          const extractConversationTitle = () => {
+            const titleFromDocument = cleanDocumentTitle(document.title);
+            if (titleFromDocument && !/^Gemini$/i.test(titleFromDocument)) {
+              return titleFromDocument;
+            }
+
+            const scope = document.querySelector("main") ?? document.body;
+            const viewportWidth = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+            const viewportHeight = Math.max(window.innerHeight, document.documentElement.clientHeight || 0);
+            const candidates = Array.from(scope.querySelectorAll<HTMLElement>("h1, h2, div, span"))
+              .map(element => {
+                if (element.closest("nav, aside, footer, button, form")) {
+                  return null;
+                }
+
+                const text = normalizeText(element.innerText || element.textContent);
+                if (
+                  !text ||
+                  text.length < 4 ||
+                  text.length > 80 ||
+                  isNoiseText(text) ||
+                  isUserRoleText(text) ||
+                  isAssistantRoleText(text) ||
+                  isCustomAssistantRoleText(text)
+                ) {
+                  return null;
+                }
+
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 60 || rect.height < 16 || rect.top > viewportHeight * 0.35) {
+                  return null;
+                }
+
+                const centerOffset = Math.abs(rect.left + rect.width / 2 - viewportWidth / 2);
+                const headingBonus = /^H[12]$/.test(element.tagName) ? 600 : 0;
+                const topBonus = Math.max(0, 260 - rect.top);
+                const centerBonus = Math.max(0, 420 - centerOffset);
+                const widthPenalty = Math.max(0, rect.width - viewportWidth * 0.6) / 2;
+
+                return {
+                  text,
+                  score: headingBonus + topBonus + centerBonus - widthPenalty
+                };
+              })
+              .filter((candidate): candidate is { text: string; score: number } => !!candidate);
+
+            candidates.sort((left, right) => right.score - left.score);
+            return candidates[0]?.text ?? "";
+          };
 
           const collectRoleMarkers = (): Marker[] => {
             const scope = document.querySelector("main") ?? document.body;
@@ -1488,11 +1559,12 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
                 continue;
               }
 
-              const isRoleHeading = isUserRoleText(text) || isAssistantRoleText(text);
+              const isRoleHeading = isUserRoleText(text) || isAssistantRoleText(text) || isCustomAssistantRoleText(text);
               const isExactNoise = exactNoisePatterns.some(pattern => pattern.test(text));
               const isBlockNoise = text.length <= 260 && blockNoisePatterns.some(pattern => pattern.test(text));
+              const isCustomGemAvatar = text.length <= 2 && /^(?:[\p{Script=Han}\p{Letter}])$/u.test(text);
 
-              if (isRoleHeading || isExactNoise || isBlockNoise) {
+              if (isRoleHeading || isExactNoise || isBlockNoise || isCustomGemAvatar) {
                 node.remove();
               }
             }
@@ -1586,9 +1658,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
               return null;
             }
 
-            const titleFromDocument = (document.title || "")
-              .replace(/\s*[-|]\s*Gemini\s*$/i, "")
-              .trim();
+            const titleFromDocument = extractConversationTitle();
 
             const fallbackTitle = firstUserText ? firstUserText.slice(0, 80) : fallbackConversationTitle;
             const excerptSource = firstAssistantText || firstUserText;
