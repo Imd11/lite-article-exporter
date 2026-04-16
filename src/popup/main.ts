@@ -382,8 +382,6 @@ function renderHistory() {
     .map(record => {
       const dateLabel = formatHistoryTimestamp(record.timestamp);
       const formatText = record.formats.map(getFormatLabel).join(" · ");
-      const statusText = record.status === "success" ? t("historyStatusSuccess") : t("historyStatusError");
-      const statusClass = record.status === "success" ? "success" : "error";
       const safeTitle = escapeHtmlInline(record.title);
       const safeUrl = escapeHtmlInline(record.url);
       const safeHost = escapeHtmlInline(getHostname(record.url));
@@ -394,15 +392,9 @@ function renderHistory() {
         : "";
       return `
         <a class="history-item" href="${safeUrl}" target="_blank" rel="noreferrer">
-          <div class="history-item-top">
-            <strong>${safeTitle}</strong>
-            <span class="history-status-pill ${statusClass}">${statusText}</span>
-          </div>
-          <div class="history-item-meta">
-            <span class="history-meta-pill">${safeHost}</span>
-            <span class="history-meta-pill">${safeFormatText}</span>
-            <span class="history-meta-pill">${safeDateLabel}</span>
-          </div>
+          <strong>${safeTitle}</strong>
+          <p class="history-item-detail">${safeHost} · ${safeFormatText}</p>
+          <p class="history-item-time">${safeDateLabel}</p>
           ${errorText}
         </a>
       `;
