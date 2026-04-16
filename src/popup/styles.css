@@ -220,11 +220,11 @@ input[type="search"]:focus {
 .option-tile {
   position: relative;
   display: grid;
-  grid-template-columns: 38px 1fr 22px;
+  grid-template-columns: 30px 1fr 18px;
   align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 14px 14px 14px 12px;
+  gap: 10px;
+  min-height: 64px;
+  padding: 12px 12px 12px 10px;
   border: 1px solid rgba(89, 73, 57, 0.1);
   border-radius: 22px;
   background:
@@ -263,15 +263,15 @@ input[type="search"]:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   border: 1px solid rgba(89, 73, 57, 0.08);
-  border-radius: 14px;
+  border-radius: 11px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.46)),
     rgba(255, 255, 255, 0.36);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84);
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .option-tile-copy {
@@ -282,7 +282,7 @@ input[type="search"]:focus {
   display: block;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
@@ -291,10 +291,10 @@ input[type="search"]:focus {
 
 .option-tile-check {
   position: relative;
-  width: 22px;
-  height: 22px;
-  border: 1.5px solid rgba(89, 73, 57, 0.26);
-  border-radius: 7px;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid rgba(89, 73, 57, 0.22);
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.7);
   transition:
     background 0.18s ease,
@@ -305,7 +305,7 @@ input[type="search"]:focus {
 .option-tile-check::before {
   content: "";
   position: absolute;
-  inset: 5px 4px 6px 5px;
+  inset: 3px 3px 4px 4px;
   border-right: 2px solid var(--primary);
   border-bottom: 2px solid var(--primary);
   transform: rotate(45deg) scale(0.65);
@@ -314,35 +314,38 @@ input[type="search"]:focus {
 }
 
 .option-tile:has(input:checked) {
-  border-color: rgba(52, 40, 32, 0.18);
+  border-color: rgba(89, 73, 57, 0.16);
   background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 46%),
-    linear-gradient(180deg, #4b3b31, #362920);
+    linear-gradient(180deg, rgba(250, 243, 235, 0.98), rgba(241, 231, 219, 0.88)),
+    rgba(236, 225, 212, 0.68);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 16px 30px rgba(52, 40, 32, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 12px 24px rgba(52, 40, 32, 0.08),
+    0 0 0 3px rgba(89, 73, 57, 0.04);
 }
 
 .option-tile:has(input:checked) .option-tile-icon {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(89, 73, 57, 0.1);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)),
-    rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6)),
+    rgba(255, 255, 255, 0.36);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
 .option-tile:has(input:checked) .option-tile-label {
-  color: var(--primary-text);
+  color: var(--text-primary);
 }
 
 .option-tile:has(input:checked) .option-tile-check {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.96);
+  border-color: var(--primary);
+  background: var(--primary);
   transform: scale(1.02);
 }
 
 .option-tile:has(input:checked) .option-tile-check::before {
   opacity: 1;
+  border-right-color: rgba(255, 255, 255, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.96);
   transform: rotate(45deg) scale(1);
 }
 
