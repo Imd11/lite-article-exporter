@@ -1503,6 +1503,56 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           const markerContainsOtherTurn = (container: HTMLElement, currentMarker: Marker, markers: Marker[]) =>
             markers.some(marker => marker !== currentMarker && container.contains(marker.element));
 
+          const comesBefore = (left: Node, right: Node) =>
+            !!(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+          const findContentElementAfterMarker = (marker: Marker, nextMarker?: Marker) => {
+            const scope = document.querySelector("main") ?? document.body;
+            const markerTop = marker.element.getBoundingClientRect().top;
+            const candidates = Array.from(
+              scope.querySelectorAll<HTMLElement>("article, section, div, p, ul, ol, li, pre, table, blockquote")
+            )
+              .map(element => {
+                if (element === marker.element || element.contains(marker.element) || element.closest("nav, aside, footer, button, form")) {
+                  return null;
+                }
+
+                if (!comesBefore(marker.element, element)) {
+                  return null;
+                }
+
+                if (nextMarker && !comesBefore(element, nextMarker.element)) {
+                  return null;
+                }
+
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 120 || rect.height < 18 || rect.top + 4 < markerTop) {
+                  return null;
+                }
+
+                const text = normalizeText(element.innerText || element.textContent);
+                if (!text || isNoiseText(text) || isUserRoleText(text) || isAssistantRoleText(text) || isCustomAssistantRoleText(text)) {
+                  return null;
+                }
+
+                const structuredCount = element.querySelectorAll("p, pre, ul, ol, li, table, blockquote, img").length;
+                const headingCount = element.querySelectorAll("h1, h2, h3, h4, h5, h6").length;
+                if (text.length < 24 && structuredCount === 0 && headingCount === 0) {
+                  return null;
+                }
+
+                const distancePenalty = Math.max(0, rect.top - markerTop);
+                return {
+                  element,
+                  score: structuredCount * 280 + headingCount * 180 + Math.min(text.length, 2400) - distancePenalty
+                };
+              })
+              .filter((candidate): candidate is { element: HTMLElement; score: number } => !!candidate);
+
+            candidates.sort((left, right) => right.score - left.score);
+            return candidates[0]?.element ?? null;
+          };
+
           const findTurnContainer = (marker: Marker, markers: Marker[]) => {
             let candidate: HTMLElement | null = null;
 
@@ -1615,19 +1665,32 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             let firstUserText = "";
             let firstAssistantText = "";
 
-            for (const marker of markers) {
-              const container = findTurnContainer(marker, markers);
+            for (const [index, marker] of markers.entries()) {
+              const nextMarker = markers[index + 1];
+              let container = findTurnContainer(marker, markers);
               if (seenTurnContainers.has(container)) {
                 continue;
               }
-              seenTurnContainers.add(container);
 
-              const clone = sanitizeTurnClone(container);
-              const text = normalizeText(clone.innerText || clone.textContent);
-              const hasImage = !!clone.querySelector("img");
+              let clone = sanitizeTurnClone(container);
+              let text = normalizeText(clone.innerText || clone.textContent);
+              let hasImage = !!clone.querySelector("img");
+
+              if (!text && !hasImage) {
+                const fallbackContainer = findContentElementAfterMarker(marker, nextMarker);
+                if (fallbackContainer && !seenTurnContainers.has(fallbackContainer)) {
+                  container = fallbackContainer;
+                  clone = sanitizeTurnClone(container);
+                  text = normalizeText(clone.innerText || clone.textContent);
+                  hasImage = !!clone.querySelector("img");
+                }
+              }
+
               if (!text && !hasImage) {
                 continue;
               }
+
+              seenTurnContainers.add(container);
 
               if (!firstUserText && marker.role === "user") {
                 firstUserText = text;
