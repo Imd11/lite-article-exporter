@@ -67,7 +67,7 @@ main {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: 660px;
+  max-height: 720px;
   overflow-y: auto;
   padding: 16px;
   padding-right: 8px;
@@ -125,6 +125,7 @@ label {
 
 .card-hero {
   padding: 18px 16px 18px;
+  min-height: 460px;
 }
 
 .hero-header {
@@ -480,7 +481,7 @@ button[type="submit"].is-busy:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 160px;
+  max-height: 120px;
   overflow-y: auto;
 }
 
