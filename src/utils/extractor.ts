@@ -1232,6 +1232,8 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           };
 
           const xNoisePatterns = [
+            /^要查看键盘快捷键，按下问号$/u,
+            /^查看键盘快捷键$/u,
             /Relevant users/i,
             /What'?s happening/i,
             /Who to follow/i,
@@ -1241,21 +1243,34 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             /Cookie Policy/i,
             /Posts?$/i,
             /^Post$/i,
+            /^Home$/i,
+            /^Explore$/i,
+            /^Notifications$/i,
+            /^Messages$/i,
+            /^Bookmarks$/i,
+            /^Profile$/i,
             /^Follow$/i,
             /^More$/i,
             /^Premium$/i,
             /^Grok$/i,
             /^Communities$/i,
             /^Lists$/i,
-            /^Bookmarks$/i,
-            /^Notifications$/i,
-            /^Home$/i,
-            /^Explore$/i,
-            /^Messages$/i,
-            /^Profile$/i,
             /^文章$/u,
+            /^主页$/u,
+            /^探索$/u,
+            /^通知$/u,
+            /^关注$/u,
+            /^聊天$/u,
+            /^书签$/u,
+            /^创作者工作室$/u,
+            /^个人资料$/u,
+            /^更多$/u,
+            /^发帖$/u,
+            /^查看新帖子$/u,
+            /^对话$/u,
             /^相关用户$/u,
-            /^有什么新鲜事$/u
+            /^有什么新鲜事$/u,
+            /^显示更多$/u
           ];
 
           const isNoiseText = (text: string) => {
@@ -1385,6 +1400,10 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             const linkCount = element.querySelectorAll("a").length;
             const paragraphLikeCount = element.querySelectorAll('p, blockquote, li, [dir="auto"]').length;
             const dataTestId = element.getAttribute("data-testid") ?? "";
+            const viewportCenterX = window.innerWidth / 2;
+            const candidateCenterX = rect.left + rect.width / 2;
+            const centerDistance = Math.abs(candidateCenterX - viewportCenterX);
+            const leadingNoiseCount = lines.slice(0, 20).filter(line => isNoiseText(line)).length;
 
             let score = Math.min(text.length, 22000);
             score += Math.min(lines.length, 80) * 40;
@@ -1392,6 +1411,8 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             score += imageCount * 45;
             score -= linkCount * 3;
             score += Math.min(rect.height, 2600) / 4;
+            score += Math.max(0, 260 - centerDistance);
+            score -= leadingNoiseCount * 220;
 
             if (text.length >= 1200) {
               score += 900;
@@ -1405,11 +1426,20 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             if (dataTestId === "cellInnerDiv") {
               score += 120;
             }
-            if (rect.width >= 260 && rect.width <= 900) {
-              score += 100;
+            if (rect.width >= 280 && rect.width <= Math.min(window.innerWidth * 0.52, 760)) {
+              score += 220;
+            }
+            if (rect.width > Math.min(window.innerWidth * 0.72, 980)) {
+              score -= 900;
             }
             if (linkCount > 80) {
               score -= 800;
+            }
+            if (leadingNoiseCount >= 4) {
+              score -= 1400;
+            }
+            if (centerDistance > window.innerWidth * 0.2) {
+              score -= 600;
             }
 
             return score;
@@ -1444,31 +1474,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             }
 
             candidates.sort((left, right) => right.score - left.score);
-            const best = candidates[0]?.element ?? null;
-            if (!best) {
-              return null;
-            }
-
-            let expanded = best;
-            for (let parent = best.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-              if (!parent.matches("main, article, section, div")) {
-                continue;
-              }
-
-              const parentScore = scoreCandidate(parent);
-              if (!Number.isFinite(parentScore)) {
-                continue;
-              }
-
-              const parentText = normalizeText(parent.innerText || parent.textContent);
-              const expandedText = normalizeText(expanded.innerText || expanded.textContent);
-
-              if (parentScore >= candidates[0].score * 0.92 && parentText.length <= expandedText.length * 1.6) {
-                expanded = parent;
-              }
-            }
-
-            return expanded;
+            return candidates[0]?.element ?? null;
           };
 
           const makeParagraphBlocks = (text: string) => {
@@ -1504,61 +1510,606 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
             );
           };
 
+          const parseFontWeight = (value: string) => {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) {
+              return numeric;
+            }
+
+            if (value === "bold" || value === "bolder") {
+              return 700;
+            }
+
+            return 400;
+          };
+
+          const isVisibleElement = (element: HTMLElement) => {
+            const style = getComputedStyle(element);
+            if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || "1") === 0) {
+              return false;
+            }
+
+            const rect = element.getBoundingClientRect();
+            return rect.width >= 8 && rect.height >= 8;
+          };
+
+          const countMeaningfulImages = (element: HTMLElement) =>
+            Array.from(element.querySelectorAll("img")).filter(img => img.naturalWidth >= 120).length;
+
+          const getDirectTextLength = (element: HTMLElement) =>
+            Array.from(element.childNodes)
+              .filter(node => node.nodeType === Node.TEXT_NODE)
+              .map(node => normalizeText(node.textContent))
+              .join(" ").length;
+
+          const isSemanticBlockTag = (tagName: string) =>
+            tagName === "p" ||
+            tagName === "blockquote" ||
+            tagName === "pre" ||
+            tagName === "figure" ||
+            tagName === "li" ||
+            tagName === "ul" ||
+            tagName === "ol" ||
+            /^h[1-6]$/.test(tagName);
+
+          const isCandidateBlockElement = (element: HTMLElement) => {
+            const tagName = element.tagName.toLowerCase();
+            const display = getComputedStyle(element).display;
+
+            return (
+              tagName === "article" ||
+              tagName === "section" ||
+              tagName === "div" ||
+              tagName === "p" ||
+              tagName === "blockquote" ||
+              tagName === "pre" ||
+              tagName === "figure" ||
+              tagName === "li" ||
+              tagName === "ul" ||
+              tagName === "ol" ||
+              /^h[1-6]$/.test(tagName) ||
+              element.getAttribute("dir") === "auto" ||
+              display === "block" ||
+              display === "flex" ||
+              display === "grid" ||
+              display === "flow-root" ||
+              display === "list-item" ||
+              display === "-webkit-box"
+            );
+          };
+
+          const median = (values: number[]) => {
+            if (values.length === 0) {
+              return 0;
+            }
+
+            const sorted = [...values].sort((left, right) => left - right);
+            const middle = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0
+              ? (sorted[middle - 1] + sorted[middle]) / 2
+              : sorted[middle];
+          };
+
+          const isFooterText = (text: string) => {
+            const normalized = normalizeText(text);
+            if (!normalized) {
+              return false;
+            }
+
+            return (
+              /查看引用/u.test(normalized) ||
+              /(?:^|[\s·])\d{4}年\d{1,2}月\d{1,2}日/u.test(normalized) ||
+              /^(?:上午|下午|凌晨|中午|晚上)\d/u.test(normalized) ||
+              /^(?:#[^#\s]+(?:\s+#[^#\s]+){1,})$/u.test(normalized) ||
+              /(?:查看|views?)$/i.test(normalized)
+            );
+          };
+
+          const looksLikeCodeText = (text: string, fontFamily = "") => {
+            const source = text
+              .replace(/\u00A0/g, " ")
+              .replace(/\r\n?/g, "\n")
+              .replace(/\t/g, "  ");
+            const lines = source
+              .split(/\n+/)
+              .map(line => line.replace(/\s+$/u, ""))
+              .filter(line => line.trim().length > 0);
+
+            if (lines.length === 0) {
+              return false;
+            }
+
+            const lowerFont = fontFamily.toLowerCase();
+            if (lowerFont.includes("mono") || lowerFont.includes("code")) {
+              return true;
+            }
+
+            const codeLikeLineCount = lines.filter(line => {
+              const trimmed = line.trim();
+              return (
+                /[{}[\];]|=>/.test(trimmed) ||
+                /^(?:import|from|def|class|function|const|let|var|if\b|elif\b|else:|for\b|while\b|return\b|git\b|pip\b|python\b|docker\b|RUN\b|ENV\b|CMD\b|COPY\b)/.test(trimmed)
+              );
+            }).length;
+            const indentedLineCount = lines.filter(line => /^\s{2,}\S/.test(line)).length;
+
+            return (
+              lines.length >= 2 &&
+              (
+                codeLikeLineCount >= Math.max(2, Math.ceil(lines.length * 0.4)) ||
+                indentedLineCount >= Math.max(2, Math.ceil(lines.length * 0.4))
+              )
+            );
+          };
+
+          const splitStructuredText = (text: string) => {
+            const source = text
+              .replace(/\u00A0/g, " ")
+              .replace(/\r\n?/g, "\n")
+              .trim();
+
+            if (!source) {
+              return [];
+            }
+
+            if (looksLikeCodeText(source)) {
+              return [source];
+            }
+
+            const normalized = source
+              .replace(/\u00A0/g, " ")
+              .replace(/\r\n?/g, "\n")
+              .replace(/([^\n])\s+(?=(?:[❌✅🔑🌐📊🔍📥🧪🔄🤖📈✍️📤🌟⚠️📋⏰])\s*[^\s])/gu, "$1\n\n")
+              .replace(/([。！？.!?])\s*(?=[📊🛠️📑🔍📥🧪🔄🤖📈✍️📤🌟🔑🚀⚠️❌✅📋⏰])/gu, "$1\n\n")
+              .replace(/([。！？.!?])\s*(?=(?:第[一二三四五六七八九十0-9]+[章节步]|[一二三四五六七八九十0-9]+[、.．:：]))/gu, "$1\n\n")
+              .replace(/([)）】」"'A-Za-z0-9\u4e00-\u9fff])\s*(?=(?:核心优势|具体使用场景|账号获取建议|配置建议|使用技巧|安装步骤|开发流程|开发框架选择|常见问题(?:及解决方案)?|示例(?:使用)?|拆解要点|拆解重点|关键词组合策略|工作流程|评估维度|决策公式|决策矩阵|危险信号|验证方法|理性选择建议|主流平台|热门Skill推荐|优质项目推荐|目标期刊|字数限制|章节要求)[:：])/gu, "$1\n\n")
+              .replace(/([:：])\s*(?=(?:核心优势|具体使用场景|账号获取建议|配置建议|使用技巧|安装步骤|开发流程|常见问题|示例使用|拆解要点|关键词组合策略|工作流程|评估维度|决策公式|决策矩阵|危险信号|验证方法|理性选择建议))/gu, "$1\n\n")
+              .replace(/([:：])\s*(?=(?:#|git\b|pip\b|python\b|export\b|docker\b|FROM\b|RUN\b|ENV\b|CMD\b|COPY\b))/gu, "$1\n\n")
+              .replace(/\s*(?=(?:[-*•]\s+|\d+\.\s+))/g, "\n");
+
+            const coarseBlocks = normalized
+              .split(/\n{2,}/)
+              .map(part => normalizeText(part))
+              .filter(Boolean);
+
+            return coarseBlocks.length > 0 ? coarseBlocks : makeParagraphBlocks(text);
+          };
+
+          const createListNode = (segment: string) => {
+            const lines = segment
+              .split(/\n+/)
+              .map(line => normalizeText(line))
+              .filter(Boolean);
+
+            if (lines.length < 2) {
+              return null;
+            }
+
+            const bulletPattern = /^[-*•]\s+/;
+            const orderedPattern = /^\d+\.\s+/;
+
+            if (lines.every(line => bulletPattern.test(line))) {
+              const list = document.createElement("ul");
+              for (const line of lines) {
+                const item = document.createElement("li");
+                item.textContent = line.replace(bulletPattern, "");
+                list.appendChild(item);
+              }
+              return list;
+            }
+
+            if (lines.every(line => orderedPattern.test(line))) {
+              const list = document.createElement("ol");
+              for (const line of lines) {
+                const item = document.createElement("li");
+                item.textContent = line.replace(orderedPattern, "");
+                list.appendChild(item);
+              }
+              return list;
+            }
+
+            return null;
+          };
+
+          const collectStructuredBlocks = (root: HTMLElement) => {
+            const blocks: Array<{
+              element: HTMLElement;
+              rawText: string;
+              text: string;
+              top: number;
+              bottom: number;
+              fontSize: number;
+              fontWeight: number;
+              fontFamily: string;
+              imageCount: number;
+              tagName: string;
+            }> = [];
+
+            const buildBlock = (element: HTMLElement) => {
+              const rawText = (element.innerText || element.textContent || "")
+                .replace(/\u00A0/g, " ")
+                .replace(/\r\n?/g, "\n");
+              const text = normalizeText(rawText);
+              const rect = element.getBoundingClientRect();
+              const style = getComputedStyle(element);
+              return {
+                element,
+                rawText,
+                text,
+                top: rect.top + window.scrollY,
+                bottom: rect.bottom + window.scrollY,
+                fontSize: parseFloat(style.fontSize || "0") || 0,
+                fontWeight: parseFontWeight(style.fontWeight || "400"),
+                fontFamily: style.fontFamily || "",
+                imageCount: countMeaningfulImages(element),
+                tagName: element.tagName.toLowerCase()
+              };
+            };
+
+            const visit = (element: HTMLElement) => {
+              if (!isCandidateBlockElement(element) || !isVisibleElement(element)) {
+                return;
+              }
+
+              if (element.closest("nav, aside, footer, form, header, button")) {
+                return;
+              }
+
+              const block = buildBlock(element);
+              if (block.imageCount === 0 && block.text.length < 8) {
+                return;
+              }
+
+              if ((isNoiseText(block.text) || isFooterText(block.text)) && block.imageCount === 0) {
+                return;
+              }
+
+              const childBlocks = Array.from(element.children)
+                .filter((child): child is HTMLElement => child instanceof HTMLElement)
+                .filter(child => isCandidateBlockElement(child) && isVisibleElement(child))
+                .map(buildBlock)
+                .filter(child => child.imageCount > 0 || child.text.length >= 8)
+                .filter(child => !(isNoiseText(child.text) && child.imageCount === 0));
+
+              const childTextCoverage = childBlocks.reduce((sum, child) => sum + child.text.length, 0);
+              const childImageCoverage = childBlocks.reduce((sum, child) => sum + child.imageCount, 0);
+              const directTextLength = getDirectTextLength(element);
+              const shouldDescend = (
+                childBlocks.length > 0 &&
+                !isSemanticBlockTag(block.tagName) &&
+                element.getAttribute("dir") !== "auto" &&
+                directTextLength < Math.max(24, block.text.length * 0.18) &&
+                (
+                  childBlocks.length === 1 ||
+                  childTextCoverage >= block.text.length * 0.55 ||
+                  childImageCoverage >= block.imageCount
+                )
+              );
+
+              if (shouldDescend) {
+                for (const child of childBlocks) {
+                  visit(child.element);
+                }
+                return;
+              }
+
+              blocks.push(block);
+            };
+
+            visit(root);
+
+            const deduped: typeof blocks = [];
+            for (const block of blocks.sort((left, right) =>
+              left.top !== right.top ? left.top - right.top : left.text.length - right.text.length
+            )) {
+              const duplicateIndex = deduped.findIndex(existing =>
+                Math.abs(existing.top - block.top) < 10 &&
+                (existing.element.contains(block.element) || block.element.contains(existing.element)) &&
+                (
+                  existing.text === block.text ||
+                  existing.text.includes(block.text) ||
+                  block.text.includes(existing.text)
+                )
+              );
+
+              if (duplicateIndex < 0) {
+                deduped.push(block);
+                continue;
+              }
+
+              if (block.text.length < deduped[duplicateIndex].text.length) {
+                deduped[duplicateIndex] = block;
+              }
+            }
+
+            return deduped.sort((left, right) =>
+              left.top !== right.top ? left.top - right.top : left.text.length - right.text.length
+            );
+          };
+
           const buildNormalizedBody = (element: HTMLElement) => {
             const wrapper = document.createElement("div");
             const seenImageUrls = new Set<string>();
 
-            const leadImages = Array.from(element.querySelectorAll("img"))
-              .filter(img => {
-                const source = (img as HTMLImageElement).currentSrc || img.getAttribute("src") || "";
-                return source.length > 0 && !seenImageUrls.has(source) && img.naturalWidth >= 120;
-              })
-              .slice(0, 6);
-
-            for (const image of leadImages) {
-              const source = (image as HTMLImageElement).currentSrc || image.getAttribute("src");
-              if (!source || seenImageUrls.has(source)) {
-                continue;
-              }
-
-              seenImageUrls.add(source);
-              const img = document.createElement("img");
-              img.src = source;
-              const alt = image.getAttribute("alt");
-              if (alt) {
-                img.alt = alt;
-              }
-              wrapper.appendChild(img);
+            const blocks = collectStructuredBlocks(element);
+            if (blocks.length === 0) {
+              return {
+                title: "",
+                bodyHtml: "",
+                bodyText: ""
+              };
             }
 
-            const rawText = element.innerText || element.textContent || "";
-            const blocks = makeParagraphBlocks(rawText);
-
-            let titleIndex = blocks.findIndex(block =>
-              block.length >= 18 &&
-              block.length <= 220 &&
-              !looksLikeMetaLine(block) &&
-              !isNoiseText(block)
+            const paragraphLikeBlocks = blocks.filter(block =>
+              !isNoiseText(block.text) &&
+              !looksLikeMetaLine(block.text) &&
+              block.text.length >= 40 &&
+              /[。！？.!?]/.test(block.text)
             );
-            if (titleIndex < 0) {
-              titleIndex = 0;
-            }
+            const paragraphFontSize = median(paragraphLikeBlocks.map(block => block.fontSize).filter(size => size > 0)) || 16;
 
-            const title = blocks[titleIndex] ?? "";
-            for (const block of blocks.slice(titleIndex + 1)) {
-              if (isNoiseText(block)) {
-                break;
+            const scorePotentialTitle = (block: typeof blocks[number], index: number) => {
+              if (isNoiseText(block.text) || looksLikeMetaLine(block.text) || isFooterText(block.text)) {
+                return Number.NEGATIVE_INFINITY;
               }
 
-              if (looksLikeMetaLine(block) || block.length < 12) {
+              let score = 0;
+              if (block.text.length >= 18 && block.text.length <= 220) {
+                score += 220;
+              } else if (block.text.length >= 12 && block.text.length <= 260) {
+                score += 80;
+              } else {
+                score -= 120;
+              }
+
+              if (/[:：!！?？]/.test(block.text)) {
+                score += 140;
+              }
+              if (/[\u4e00-\u9fff]/u.test(block.text)) {
+                score += 80;
+              }
+              if (block.text.length >= 24 && block.text.length <= 120) {
+                score += 120;
+              }
+              if (block.text.length > 160) {
+                score -= 80;
+              }
+              if (block.fontSize > paragraphFontSize) {
+                score += Math.min(320, (block.fontSize - paragraphFontSize) * 80);
+              }
+              if (block.fontWeight >= 600) {
+                score += 120;
+              }
+              if (isSemanticBlockTag(block.tagName)) {
+                score += 60;
+              }
+              if (index < 8) {
+                score += 180 - index * 18;
+              }
+              if (/\|/.test(block.text) && block.text.length < 40) {
+                score -= 260;
+              }
+
+              const nextContentBlocks = blocks
+                .slice(index + 1)
+                .filter(part => !isNoiseText(part.text) && !looksLikeMetaLine(part.text) && !isFooterText(part.text))
+                .slice(0, 3);
+
+              if (nextContentBlocks.length >= 2) {
+                score += 80;
+              }
+              if (nextContentBlocks.some(part => /^@\w+/i.test(part.text))) {
+                score -= 220;
+              }
+              if (nextContentBlocks.some(part => part.text.length >= 80 && /[。！？.!?]/.test(part.text))) {
+                score += 240;
+              }
+
+              return score;
+            };
+
+            let titleIndex = 0;
+            let bestTitleScore = Number.NEGATIVE_INFINITY;
+            for (const [index, block] of blocks.entries()) {
+              const score = scorePotentialTitle(block, index);
+              if (score > bestTitleScore) {
+                bestTitleScore = score;
+                titleIndex = index;
+              }
+            }
+
+            const title = blocks[titleIndex]?.text ?? "";
+            const titleFontSize = blocks[titleIndex]?.fontSize || paragraphFontSize;
+
+            const getSingleLineText = (value: string) => normalizeText(value.replace(/\r\n?/g, " "));
+
+            const appendImageNodes = (sourceElement: HTMLElement) => {
+              const images = Array.from(sourceElement.querySelectorAll("img"))
+                .filter(img => img.naturalWidth >= 120)
+                .slice(0, 6);
+
+              for (const image of images) {
+                const source = (image as HTMLImageElement).currentSrc || image.getAttribute("src");
+                if (!source || seenImageUrls.has(source)) {
+                  continue;
+                }
+
+                seenImageUrls.add(source);
+                const img = document.createElement("img");
+                img.src = source;
+                const alt = image.getAttribute("alt");
+                if (alt) {
+                  img.alt = alt;
+                }
+                wrapper.appendChild(img);
+              }
+            };
+
+            const appendCodeBlock = (text: string) => {
+              const trimmed = text.replace(/\s+$/u, "");
+              if (!trimmed) {
+                return;
+              }
+
+              const pre = document.createElement("pre");
+              const code = document.createElement("code");
+              code.textContent = trimmed;
+              pre.appendChild(code);
+              wrapper.appendChild(pre);
+            };
+
+            const isHeadingSegment = (segment: string, block: typeof blocks[number]) => {
+              if (segment.length < 6 || segment.length > 140) {
+                return false;
+              }
+
+              if (looksLikeMetaLine(segment) || isNoiseText(segment)) {
+                return false;
+              }
+
+              if (/^[📊🛠️📑🔍📥🧪🔄🤖📈✍️📤🌟🔑🚀⚠️❌✅📋⏰]/u.test(segment)) {
+                return true;
+              }
+
+              if (/^(?:第[一二三四五六七八九十0-9]+[章节步]|[一二三四五六七八九十0-9]+[、.．:：])/u.test(segment)) {
+                return true;
+              }
+
+              if (block.fontWeight >= 600 && block.fontSize >= paragraphFontSize * 1.05) {
+                return true;
+              }
+
+              return !/[。！？.!?]/.test(segment) && segment.length <= 60 && block.fontSize >= paragraphFontSize;
+            };
+
+            const getListType = (segment: string) => {
+              if (/^[-*•]\s+/.test(segment)) {
+                return "ul";
+              }
+
+              if (/^\d+\.\s+/.test(segment)) {
+                return "ol";
+              }
+
+              return null;
+            };
+
+            const stripListMarker = (segment: string) =>
+              segment.replace(/^[-*•]\s+/, "").replace(/^\d+\.\s+/, "");
+
+            let activeList: HTMLUListElement | HTMLOListElement | null = null;
+            let activeListType: "ul" | "ol" | null = null;
+            const resetActiveList = () => {
+              activeList = null;
+              activeListType = null;
+            };
+            const ensureList = (type: "ul" | "ol") => {
+              if (!activeList || activeListType !== type) {
+                activeList = document.createElement(type);
+                activeListType = type;
+                wrapper.appendChild(activeList);
+              }
+              return activeList;
+            };
+
+            let bodyStarted = false;
+
+            for (const [index, block] of blocks.entries()) {
+              if (index < titleIndex) {
+                if (block.imageCount > 0 && Math.abs(block.top - blocks[titleIndex].top) < 320) {
+                  appendImageNodes(block.element);
+                }
                 continue;
               }
 
-              const node = block.length <= 60 && !/[。！？.!?]/.test(block)
-                ? document.createElement("h2")
-                : document.createElement("p");
-              node.textContent = block;
-              wrapper.appendChild(node);
+              if (index === titleIndex) {
+                continue;
+              }
+
+              if (isFooterText(block.text)) {
+                resetActiveList();
+                if (bodyStarted) {
+                  break;
+                }
+                continue;
+              }
+
+              if (isNoiseText(block.text) || looksLikeMetaLine(block.text)) {
+                resetActiveList();
+                continue;
+              }
+
+              if (block.imageCount > 0) {
+                appendImageNodes(block.element);
+                if (block.text.length < 24) {
+                  resetActiveList();
+                  continue;
+                }
+              }
+
+              const segments = splitStructuredText(block.rawText);
+              if (segments.length === 0) {
+                resetActiveList();
+                continue;
+              }
+
+              for (const segment of segments) {
+                const singleLineSegment = getSingleLineText(segment);
+                if (!singleLineSegment || isNoiseText(singleLineSegment) || looksLikeMetaLine(singleLineSegment) || isFooterText(singleLineSegment)) {
+                  resetActiveList();
+                  continue;
+                }
+
+                if (looksLikeCodeText(segment, block.fontFamily)) {
+                  resetActiveList();
+                  appendCodeBlock(segment);
+                  bodyStarted = true;
+                  continue;
+                }
+
+                const listNode = createListNode(segment);
+                if (listNode) {
+                  resetActiveList();
+                  wrapper.appendChild(listNode);
+                  bodyStarted = true;
+                  continue;
+                }
+
+                const listType = getListType(singleLineSegment);
+                if (listType) {
+                  const list = ensureList(listType);
+                  const item = document.createElement("li");
+                  item.textContent = stripListMarker(singleLineSegment);
+                  list.appendChild(item);
+                  bodyStarted = true;
+                  continue;
+                }
+
+                resetActiveList();
+
+                if (isHeadingSegment(singleLineSegment, block)) {
+                  const heading = document.createElement(
+                    block.fontSize >= Math.max(titleFontSize * 0.82, paragraphFontSize * 1.18) ? "h2" : "h3"
+                  );
+                  heading.textContent = singleLineSegment;
+                  wrapper.appendChild(heading);
+                  bodyStarted = true;
+                  continue;
+                }
+
+                if (block.tagName === "blockquote") {
+                  const quote = document.createElement("blockquote");
+                  const paragraph = document.createElement("p");
+                  paragraph.textContent = singleLineSegment;
+                  quote.appendChild(paragraph);
+                  wrapper.appendChild(quote);
+                } else {
+                  const paragraph = document.createElement("p");
+                  paragraph.textContent = singleLineSegment;
+                  wrapper.appendChild(paragraph);
+                }
+                bodyStarted = true;
+              }
             }
 
             if (wrapper.childNodes.length === 0 && title) {
