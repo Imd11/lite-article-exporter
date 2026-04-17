@@ -33,6 +33,15 @@ type SerializedGrokConversation = {
   language?: string | null;
 };
 
+type SerializedXLongformArticle = {
+  title?: string;
+  excerpt?: string | null;
+  canonicalUrl?: string | null;
+  byline?: string;
+  bodyHtml: string;
+  language?: string | null;
+};
+
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
@@ -663,6 +672,34 @@ function buildGrokConversationFromSerializedPayload(
   };
 }
 
+function buildXLongformArticleFromSerializedPayload(
+  documentRef: Document,
+  sourceUrl: string,
+  payload: SerializedXLongformArticle
+): Omit<ArticleData, "fetchedAt"> | null {
+  const articleUrl = normalizeXArticleUrl(payload.canonicalUrl ?? sourceUrl) ?? sourceUrl;
+  const tempContainer = documentRef.createElement("div");
+  tempContainer.innerHTML = payload.bodyHtml;
+  tempContainer.querySelectorAll("script, style, noscript").forEach(node => node.remove());
+
+  const images = sanitizeContent(tempContainer as HTMLElement, articleUrl);
+  const textContent = tempContainer.textContent?.trim() ?? "";
+  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+    return null;
+  }
+
+  return {
+    url: articleUrl,
+    title: payload.title?.trim() || documentRef.title || t("defaultTitle"),
+    byline: payload.byline ?? undefined,
+    excerpt: payload.excerpt ?? undefined,
+    contentHtml: tempContainer.innerHTML,
+    textContent,
+    images: dedupeImages(images),
+    language: payload.language || documentRef.documentElement.lang || undefined
+  };
+}
+
 function extractSubstackCanonicalUrl(documentRef: Document, sourceUrl: string): string | null {
   const preloads = extractSubstackPreloads(documentRef);
   if (preloads) {
@@ -738,6 +775,56 @@ function isGrokConversationUrl(url: string): boolean {
     return isGrokHost(parsed.hostname) && (parsed.pathname.startsWith("/c/") || parsed.pathname.startsWith("/share/"));
   } catch {
     return false;
+  }
+}
+
+function isXHost(hostname: string): boolean {
+  return hostname === "x.com" || hostname === "www.x.com" || hostname === "twitter.com" || hostname === "www.twitter.com";
+}
+
+function isXStatusPath(pathname: string): boolean {
+  return /^\/(?:i\/web\/)?status\/\d+/i.test(pathname) || /^\/[^/]+\/status\/\d+/i.test(pathname);
+}
+
+function isXArticlePath(pathname: string): boolean {
+  return /^\/i\/article\/\d+/i.test(pathname);
+}
+
+function isXStatusUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isXHost(parsed.hostname) && isXStatusPath(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isXArticleUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isXHost(parsed.hostname) && isXArticlePath(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isXLongformUrl(url: string): boolean {
+  return isXStatusUrl(url) || isXArticleUrl(url);
+}
+
+function normalizeXArticleUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!isXHost(parsed.hostname) || !isXArticlePath(parsed.pathname)) {
+      return null;
+    }
+
+    parsed.protocol = "https:";
+    parsed.hostname = "x.com";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return null;
   }
 }
 
@@ -1108,6 +1195,431 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
     // 等待一小段时间让图片完全加载（针对懒加载图片）
     await new Promise(resolve => setTimeout(resolve, 1000));
+
+    if (isXLongformUrl(url)) {
+      const xResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async () => {
+          const normalizeText = (value: string | null | undefined) =>
+            (value ?? "").replace(/\u00A0/g, " ").replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").trim();
+
+          const isXHostName = (hostname: string) =>
+            hostname === "x.com" || hostname === "www.x.com" || hostname === "twitter.com" || hostname === "www.twitter.com";
+
+          const isStatusPathname = (pathname: string) =>
+            /^\/(?:i\/web\/)?status\/\d+/i.test(pathname) || /^\/[^/]+\/status\/\d+/i.test(pathname);
+
+          const isArticlePathname = (pathname: string) => /^\/i\/article\/\d+/i.test(pathname);
+
+          const normalizeArticleUrl = (value: string | null | undefined) => {
+            if (!value) {
+              return null;
+            }
+
+            try {
+              const parsed = new URL(value, location.href);
+              if (!isXHostName(parsed.hostname) || !isArticlePathname(parsed.pathname)) {
+                return null;
+              }
+
+              parsed.protocol = "https:";
+              parsed.hostname = "x.com";
+              parsed.hash = "";
+              return parsed.toString();
+            } catch {
+              return null;
+            }
+          };
+
+          const xNoisePatterns = [
+            /Relevant users/i,
+            /What'?s happening/i,
+            /Who to follow/i,
+            /You might like/i,
+            /Terms of Service/i,
+            /Privacy Policy/i,
+            /Cookie Policy/i,
+            /Posts?$/i,
+            /^Post$/i,
+            /^Follow$/i,
+            /^More$/i,
+            /^Premium$/i,
+            /^Grok$/i,
+            /^Communities$/i,
+            /^Lists$/i,
+            /^Bookmarks$/i,
+            /^Notifications$/i,
+            /^Home$/i,
+            /^Explore$/i,
+            /^Messages$/i,
+            /^Profile$/i,
+            /^文章$/u,
+            /^相关用户$/u,
+            /^有什么新鲜事$/u
+          ];
+
+          const isNoiseText = (text: string) => {
+            const normalized = normalizeText(text);
+            if (!normalized) {
+              return false;
+            }
+            return xNoisePatterns.some(pattern => pattern.test(normalized));
+          };
+
+          const collectRoots = () => {
+            const roots: Array<Document | ShadowRoot> = [document];
+            const queue: Array<Document | ShadowRoot> = [document];
+            const seen = new Set<Node>([document]);
+
+            while (queue.length > 0) {
+              const root = queue.shift();
+              if (!root) {
+                continue;
+              }
+
+              const elements = Array.from(root.querySelectorAll("*"));
+              for (const element of elements) {
+                const shadowRoot = (element as HTMLElement).shadowRoot;
+                if (shadowRoot && !seen.has(shadowRoot)) {
+                  seen.add(shadowRoot);
+                  roots.push(shadowRoot);
+                  queue.push(shadowRoot);
+                }
+              }
+            }
+
+            return roots;
+          };
+
+          const extractArticleUrlFromState = () => {
+            const fromLocation = normalizeArticleUrl(location.href);
+            if (fromLocation) {
+              return fromLocation;
+            }
+
+            const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/i/article/"]'));
+            for (const anchor of anchors) {
+              const normalized = normalizeArticleUrl(anchor.href || anchor.getAttribute("href"));
+              if (normalized) {
+                return normalized;
+              }
+            }
+
+            try {
+              const state = (window as typeof window & {
+                __INITIAL_STATE__?: {
+                  entities?: {
+                    tweets?: {
+                      entities?: Record<string, {
+                        entities?: {
+                          urls?: Array<{ expanded_url?: string; url?: string }>;
+                        };
+                      }>;
+                    };
+                  };
+                };
+              }).__INITIAL_STATE__;
+
+              const statusId = location.pathname.match(/\/status\/(\d+)/)?.[1];
+              const tweet = statusId ? state?.entities?.tweets?.entities?.[statusId] : undefined;
+              const urls = tweet?.entities?.urls ?? [];
+              for (const entry of urls) {
+                const normalized = normalizeArticleUrl(entry?.expanded_url || entry?.url);
+                if (normalized) {
+                  return normalized;
+                }
+              }
+            } catch {
+              // Ignore X runtime state parsing failures.
+            }
+
+            return null;
+          };
+
+          const hasMeaningfulXArticle = (element: HTMLElement | null) => {
+            if (!element) {
+              return false;
+            }
+
+            const text = normalizeText(element.innerText || element.textContent);
+            if (text.length < 500) {
+              return false;
+            }
+
+            const lines = (element.innerText || element.textContent || "")
+              .split(/\n+/)
+              .map(part => normalizeText(part))
+              .filter(Boolean);
+
+            const imageCount = element.querySelectorAll("img").length;
+            const dirAutoCount = element.querySelectorAll('[dir="auto"]').length;
+
+            return (
+              text.length >= 1400 ||
+              (text.length >= 900 && lines.length >= 8) ||
+              (text.length >= 650 && lines.length >= 6 && (imageCount > 0 || dirAutoCount >= 4))
+            );
+          };
+
+          const scoreCandidate = (element: HTMLElement) => {
+            if (element.closest("nav, aside, footer, form, header, button")) {
+              return Number.NEGATIVE_INFINITY;
+            }
+
+            const rect = element.getBoundingClientRect();
+            if (rect.width < 220 || rect.height < 80) {
+              return Number.NEGATIVE_INFINITY;
+            }
+
+            const text = normalizeText(element.innerText || element.textContent);
+            if (text.length < 180 || isNoiseText(text)) {
+              return Number.NEGATIVE_INFINITY;
+            }
+
+            const lines = (element.innerText || element.textContent || "")
+              .split(/\n+/)
+              .map(part => normalizeText(part))
+              .filter(Boolean);
+
+            const imageCount = element.querySelectorAll("img").length;
+            const linkCount = element.querySelectorAll("a").length;
+            const paragraphLikeCount = element.querySelectorAll('p, blockquote, li, [dir="auto"]').length;
+            const dataTestId = element.getAttribute("data-testid") ?? "";
+
+            let score = Math.min(text.length, 22000);
+            score += Math.min(lines.length, 80) * 40;
+            score += paragraphLikeCount * 75;
+            score += imageCount * 45;
+            score -= linkCount * 3;
+            score += Math.min(rect.height, 2600) / 4;
+
+            if (text.length >= 1200) {
+              score += 900;
+            }
+            if (lines.length >= 8) {
+              score += 400;
+            }
+            if (element.tagName.toLowerCase() === "article") {
+              score += 240;
+            }
+            if (dataTestId === "cellInnerDiv") {
+              score += 120;
+            }
+            if (rect.width >= 260 && rect.width <= 900) {
+              score += 100;
+            }
+            if (linkCount > 80) {
+              score -= 800;
+            }
+
+            return score;
+          };
+
+          const findBestXCandidate = () => {
+            const roots = collectRoots();
+            const selectors = [
+              "main article",
+              'main [data-testid="cellInnerDiv"]',
+              "main section",
+              "main div"
+            ];
+            const candidates: Array<{ element: HTMLElement; score: number }> = [];
+            const seen = new Set<HTMLElement>();
+
+            for (const root of roots) {
+              for (const selector of selectors) {
+                const matches = Array.from(root.querySelectorAll<HTMLElement>(selector));
+                for (const match of matches) {
+                  if (seen.has(match)) {
+                    continue;
+                  }
+
+                  seen.add(match);
+                  const score = scoreCandidate(match);
+                  if (Number.isFinite(score)) {
+                    candidates.push({ element: match, score });
+                  }
+                }
+              }
+            }
+
+            candidates.sort((left, right) => right.score - left.score);
+            const best = candidates[0]?.element ?? null;
+            if (!best) {
+              return null;
+            }
+
+            let expanded = best;
+            for (let parent = best.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+              if (!parent.matches("main, article, section, div")) {
+                continue;
+              }
+
+              const parentScore = scoreCandidate(parent);
+              if (!Number.isFinite(parentScore)) {
+                continue;
+              }
+
+              const parentText = normalizeText(parent.innerText || parent.textContent);
+              const expandedText = normalizeText(expanded.innerText || expanded.textContent);
+
+              if (parentScore >= candidates[0].score * 0.92 && parentText.length <= expandedText.length * 1.6) {
+                expanded = parent;
+              }
+            }
+
+            return expanded;
+          };
+
+          const makeParagraphBlocks = (text: string) => {
+            const rawBlocks = text
+              .replace(/\r\n?/g, "\n")
+              .split(/\n{2,}/)
+              .map(part => normalizeText(part))
+              .filter(Boolean);
+
+            if (rawBlocks.length >= 3) {
+              return rawBlocks;
+            }
+
+            return text
+              .replace(/\r\n?/g, "\n")
+              .split(/\n+/)
+              .map(part => normalizeText(part))
+              .filter(Boolean);
+          };
+
+          const looksLikeMetaLine = (text: string) => {
+            const normalized = normalizeText(text);
+            if (!normalized) {
+              return true;
+            }
+
+            return (
+              /^@\w+/i.test(normalized) ||
+              /^https?:\/\//i.test(normalized) ||
+              /^[\d\s.,万亿kKmM]+$/.test(normalized) ||
+              /^(?:AM|PM|\d{1,2}:\d{2})/i.test(normalized) ||
+              (normalized.length <= 32 && /(?:^|[\s|])\d+(?:\.\d+)?(?:万|k|m)?(?:[\s|]|$)/i.test(normalized))
+            );
+          };
+
+          const buildNormalizedBody = (element: HTMLElement) => {
+            const wrapper = document.createElement("div");
+            const seenImageUrls = new Set<string>();
+
+            const leadImages = Array.from(element.querySelectorAll("img"))
+              .filter(img => {
+                const source = (img as HTMLImageElement).currentSrc || img.getAttribute("src") || "";
+                return source.length > 0 && !seenImageUrls.has(source) && img.naturalWidth >= 120;
+              })
+              .slice(0, 6);
+
+            for (const image of leadImages) {
+              const source = (image as HTMLImageElement).currentSrc || image.getAttribute("src");
+              if (!source || seenImageUrls.has(source)) {
+                continue;
+              }
+
+              seenImageUrls.add(source);
+              const img = document.createElement("img");
+              img.src = source;
+              const alt = image.getAttribute("alt");
+              if (alt) {
+                img.alt = alt;
+              }
+              wrapper.appendChild(img);
+            }
+
+            const rawText = element.innerText || element.textContent || "";
+            const blocks = makeParagraphBlocks(rawText);
+
+            let titleIndex = blocks.findIndex(block =>
+              block.length >= 18 &&
+              block.length <= 220 &&
+              !looksLikeMetaLine(block) &&
+              !isNoiseText(block)
+            );
+            if (titleIndex < 0) {
+              titleIndex = 0;
+            }
+
+            const title = blocks[titleIndex] ?? "";
+            for (const block of blocks.slice(titleIndex + 1)) {
+              if (isNoiseText(block)) {
+                break;
+              }
+
+              if (looksLikeMetaLine(block) || block.length < 12) {
+                continue;
+              }
+
+              const node = block.length <= 60 && !/[。！？.!?]/.test(block)
+                ? document.createElement("h2")
+                : document.createElement("p");
+              node.textContent = block;
+              wrapper.appendChild(node);
+            }
+
+            if (wrapper.childNodes.length === 0 && title) {
+              const paragraph = document.createElement("p");
+              paragraph.textContent = title;
+              wrapper.appendChild(paragraph);
+            }
+
+            const bodyText = normalizeText(wrapper.textContent);
+            return {
+              title,
+              bodyHtml: wrapper.innerHTML,
+              bodyText
+            };
+          };
+
+          const titleFromDocument = (document.title || "")
+            .replace(/\s*\/\s*X\s*$/i, "")
+            .replace(/\s*on X:?\s*$/i, "")
+            .trim();
+
+          const startedAt = Date.now();
+          let candidate = findBestXCandidate();
+          while (Date.now() - startedAt < 8000 && !hasMeaningfulXArticle(candidate)) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            candidate = findBestXCandidate();
+          }
+
+          if (!candidate || !hasMeaningfulXArticle(candidate)) {
+            return null;
+          }
+
+          const articleUrl = extractArticleUrlFromState();
+          const normalizedBody = buildNormalizedBody(candidate);
+          if (!normalizedBody.bodyHtml || normalizedBody.bodyText.length < 400) {
+            return null;
+          }
+
+          return {
+            title: normalizedBody.title || titleFromDocument,
+            excerpt: normalizedBody.bodyText.slice(0, 220) || null,
+            canonicalUrl: articleUrl,
+            bodyHtml: normalizedBody.bodyHtml,
+            language: document.documentElement.lang || null
+          };
+        }
+      });
+
+      const xPayload = xResults?.[0]?.result as SerializedXLongformArticle | null | undefined;
+      if (xPayload?.bodyHtml) {
+        const xDoc = new DOMParser().parseFromString("<!DOCTYPE html><html><head></head><body></body></html>", "text/html");
+        const xArticle = buildXLongformArticleFromSerializedPayload(xDoc, url, xPayload);
+        if (xArticle) {
+          console.log(`从 X 长文页面提取正文：${xArticle.images.length} 张图片，${xArticle.textContent.length} 字符`);
+          return {
+            ...xArticle,
+            fetchedAt: Date.now()
+          };
+        }
+      }
+    }
 
     if (isChatGptConversationUrl(url)) {
       const chatResults = await chrome.scripting.executeScript({
