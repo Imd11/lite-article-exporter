@@ -254,6 +254,284 @@ const TEXT_NOISE_PATTERNS = [
   /TopLatestDiscussions/i,
   /CommentsRestacks/i
 ];
+const STRUCTURAL_NOISE_PATTERNS = [
+  /This feature is available for registered users/i,
+  /\bGift this article free\b/i,
+  /\bGift article\b/i,
+  /\bShare article\b/i,
+  /\bAdd us as preferred source\b/i,
+  /\bRelated Topics\b/i,
+  /\bRegister\b[\s\S]{0,40}\bLog in\b/i,
+  /\bComment speech bubble icon\b/i
+];
+
+function getHostnameFromUrl(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isTelegraphHostName(hostname: string | null | undefined): boolean {
+  if (!hostname) {
+    return false;
+  }
+
+  return hostname === "telegraph.co.uk" || hostname.endsWith(".telegraph.co.uk");
+}
+
+function isTelegraphUrl(url: string): boolean {
+  return isTelegraphHostName(getHostnameFromUrl(url));
+}
+
+function countMatchingPatterns(patterns: RegExp[], text: string): number {
+  return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function normalizeWhitespacePreservingParagraphs(text: string): string {
+  return text
+    .replace(/\u00A0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function getPreferredContentSelectors(baseUrl: string): string[] {
+  const hostname = getHostnameFromUrl(baseUrl);
+  const siteSpecific: string[] = [];
+
+  if (isTelegraphHostName(hostname)) {
+    siteSpecific.push(
+      '[itemprop="articleBody"]',
+      '[data-testid="article-body"]',
+      '[data-testid*="article-body"]',
+      '[class*="articleBody"]',
+      '[class*="article-body"]',
+      '[class*="ArticleBody"]',
+      '[class*="story-body"]',
+      '[class*="storyBody"]'
+    );
+  }
+
+  return [
+    ...siteSpecific,
+    "#js_content",
+    ".rich_media_content",
+    ".available-content .body.markup",
+    ".available-content .markup",
+    ".available-content",
+    ".body.markup",
+    ".substack-post-body",
+    ".post-body",
+    ".post-content",
+    ".article-content",
+    ".entry-content",
+    '[data-testid="post-body"]',
+    '[data-testid*="post"]',
+    '[class*="post-body"]',
+    '[class*="post-content"]',
+    '[class*="article-content"]',
+    '[class*="article-body"]',
+    '[class*="markup"]',
+    '[class*="prose"]',
+    '[class*="story-body"]',
+    "article",
+    '[role="article"]',
+    "main",
+    '[role="main"]'
+  ];
+}
+
+function getSchemaTypes(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  return [];
+}
+
+function isArticleSchemaType(types: string[]): boolean {
+  return types.some(type => /(^|:)(article|newsarticle|reportagenewsarticle|analysisnewsarticle|blogposting)$/i.test(type));
+}
+
+function extractSchemaText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const normalized = normalizeWhitespacePreservingParagraphs(value);
+    return normalized || undefined;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const candidates = [record.name, record.headline, record.description, record.text];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const normalized = normalizeWhitespacePreservingParagraphs(candidate);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function extractSchemaAuthorName(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const names = value
+      .map(entry => extractSchemaAuthorName(entry))
+      .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+    return names.length ? names.join(", ") : undefined;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return extractSchemaText(record.name ?? record.author);
+  }
+
+  return undefined;
+}
+
+function collectJsonLdObjects(value: unknown): Array<Record<string, unknown>> {
+  const results: Array<Record<string, unknown>> = [];
+
+  const visit = (node: unknown) => {
+    if (!node) {
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+
+    if (typeof node !== "object") {
+      return;
+    }
+
+    const record = node as Record<string, unknown>;
+    results.push(record);
+
+    if (record["@graph"]) {
+      visit(record["@graph"]);
+    }
+  };
+
+  visit(value);
+  return results;
+}
+
+function splitStructuredArticleBody(text: string): string[] {
+  const normalized = normalizeWhitespacePreservingParagraphs(text);
+  if (!normalized) {
+    return [];
+  }
+
+  const blocks = normalized
+    .split(/\n{2,}|\n+/)
+    .map(block => block.trim())
+    .filter(Boolean);
+
+  if (blocks.length > 0) {
+    return blocks;
+  }
+
+  return [normalized];
+}
+
+function buildStructuredArticleHtml(documentRef: Document, text: string): string {
+  const container = documentRef.createElement("div");
+
+  for (const paragraph of splitStructuredArticleBody(text)) {
+    const element = documentRef.createElement("p");
+    element.textContent = paragraph;
+    container.appendChild(element);
+  }
+
+  return container.innerHTML;
+}
+
+function extractStructuredArticleFromJsonLd(
+  documentRef: Document,
+  sourceUrl: string
+): Omit<ArticleData, "fetchedAt"> | null {
+  const scripts = Array.from(documentRef.querySelectorAll('script[type="application/ld+json"]'));
+  let bestCandidate: Omit<ArticleData, "fetchedAt"> | null = null;
+  let bestScore = 0;
+
+  for (const script of scripts) {
+    const text = script.textContent?.trim();
+    if (!text) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      const candidates = collectJsonLdObjects(parsed);
+
+      for (const candidate of candidates) {
+        if (!isArticleSchemaType(getSchemaTypes(candidate["@type"]))) {
+          continue;
+        }
+
+        const articleBody = extractSchemaText(candidate.articleBody);
+        if (!articleBody || articleBody.length < 400) {
+          continue;
+        }
+
+        const contentHtml = buildStructuredArticleHtml(documentRef, articleBody);
+        const tempContainer = documentRef.createElement("div");
+        tempContainer.innerHTML = contentHtml;
+        const textContent = tempContainer.textContent?.trim() ?? "";
+        if (!hasMeaningfulArticleContent(tempContainer, textContent, sourceUrl)) {
+          continue;
+        }
+
+        const articleUrl =
+          extractSchemaText(candidate.url) ||
+          extractSchemaText(candidate.mainEntityOfPage) ||
+          extractCanonicalUrl(documentRef, sourceUrl) ||
+          sourceUrl;
+
+        const score = textContent.length;
+        if (score <= bestScore) {
+          continue;
+        }
+
+        bestScore = score;
+        bestCandidate = {
+          url: articleUrl,
+          title:
+            extractSchemaText(candidate.headline) ||
+            extractSchemaText(candidate.name) ||
+            documentRef.title ||
+            t("defaultTitle"),
+          byline: extractSchemaAuthorName(candidate.author),
+          excerpt: extractSchemaText(candidate.description) ?? undefined,
+          contentHtml,
+          textContent,
+          images: [],
+          language: extractSchemaText(candidate.inLanguage) || documentRef.documentElement.lang || undefined
+        };
+      }
+    } catch (error) {
+      console.warn("Failed to parse JSON-LD article", error);
+    }
+  }
+
+  return bestCandidate;
+}
 
 function isLikelyAd(node: Element): boolean {
   if (!node.getAttribute) return false;
@@ -394,6 +672,37 @@ function normalizeExtractedText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function stripTelegraphNoise(container: HTMLElement): void {
+  const candidates = Array.from(
+    container.querySelectorAll("section, div, aside, ul, ol, nav, header, footer, p")
+  );
+
+  for (const element of candidates) {
+    if (element === container) {
+      continue;
+    }
+
+    const text = normalizeExtractedText(element.textContent ?? "");
+    if (!text) {
+      continue;
+    }
+
+    const noiseHits = countMatchingPatterns(STRUCTURAL_NOISE_PATTERNS, text);
+    const looksLikeAuthorCard =
+      /is The (Sunday )?Telegraph'?s .* Editor/i.test(text) ||
+      /can be contacted at .*@telegraph\.co\.uk/i.test(text);
+    const looksLikeUtilityCluster = element.querySelectorAll("a, button").length >= 3;
+
+    if (
+      noiseHits >= 2 ||
+      (noiseHits >= 1 && looksLikeUtilityCluster) ||
+      looksLikeAuthorCard
+    ) {
+      element.remove();
+    }
+  }
+}
+
 function isLikelyRecommendationBlock(container: ParentNode, text: string): boolean {
   const normalizedText = normalizeExtractedText(text);
   if (!normalizedText) {
@@ -532,7 +841,7 @@ function extractSubstackArticleFromPreloads(
   const images = sanitizeContent(tempContainer as HTMLElement, articleUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
 
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, articleUrl)) {
     return null;
   }
 
@@ -571,7 +880,7 @@ function buildSubstackArticleFromSerializedPayload(
 
   const images = sanitizeContent(tempContainer as HTMLElement, articleUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, articleUrl)) {
     return null;
   }
 
@@ -598,7 +907,7 @@ function buildChatGptConversationFromSerializedPayload(
 
   const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, sourceUrl)) {
     return null;
   }
 
@@ -629,7 +938,7 @@ function buildGeminiConversationFromSerializedPayload(
 
   const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, sourceUrl)) {
     return null;
   }
 
@@ -656,7 +965,7 @@ function buildGrokConversationFromSerializedPayload(
 
   const images = sanitizeContent(tempContainer as HTMLElement, sourceUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, sourceUrl)) {
     return null;
   }
 
@@ -684,7 +993,7 @@ function buildXLongformArticleFromSerializedPayload(
 
   const images = sanitizeContent(tempContainer as HTMLElement, articleUrl);
   const textContent = tempContainer.textContent?.trim() ?? "";
-  if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+  if (!hasMeaningfulArticleContent(tempContainer, textContent, articleUrl)) {
     return null;
   }
 
@@ -859,6 +1168,7 @@ function scoreContentCandidate(element: Element): number {
   const imageCount = clone.querySelectorAll("img").length;
   const linkCount = clone.querySelectorAll("a").length;
   const buttonCount = clone.querySelectorAll("button").length;
+  const noiseHits = countMatchingPatterns(STRUCTURAL_NOISE_PATTERNS, text);
 
   let score = Math.min(textLength, 12000);
   score += paragraphCount * 260;
@@ -869,6 +1179,7 @@ function scoreContentCandidate(element: Element): number {
   score += imageCount * 30;
   score -= linkCount * 6;
   score -= buttonCount * 100;
+  score -= noiseHits * 700;
 
   if (paragraphCount === 0 && listCount === 0 && quoteCount === 0 && codeBlockCount === 0) {
     score -= 800;
@@ -894,6 +1205,10 @@ function scoreContentCandidate(element: Element): number {
     score -= 1200;
   }
 
+  if (noiseHits >= 2) {
+    score -= 1600;
+  }
+
   if (element.tagName.toLowerCase() === "article") {
     score += 120;
   }
@@ -906,32 +1221,7 @@ function scoreContentCandidate(element: Element): number {
 }
 
 function findBestContentContainer(documentRef: Document): Element | null {
-  const selectors = [
-    "#js_content",                 // 微信公众号正文容器
-    ".rich_media_content",         // 微信公众号正文 class
-    ".available-content .body.markup",
-    ".available-content .markup",
-    ".available-content",
-    ".body.markup",
-    ".substack-post-body",
-    ".post-body",
-    ".post-content",
-    ".article-content",
-    ".entry-content",
-    '[data-testid="post-body"]',
-    '[data-testid*="post"]',
-    '[class*="post-body"]',
-    '[class*="post-content"]',
-    '[class*="article-content"]',
-    '[class*="article-body"]',
-    '[class*="markup"]',
-    '[class*="prose"]',
-    '[class*="story-body"]',
-    "article",
-    '[role="article"]',
-    "main",
-    '[role="main"]'
-  ];
+  const selectors = getPreferredContentSelectors(documentRef.baseURI || documentRef.URL);
 
   const seen = new Set<Element>();
   const candidates: Array<{ element: Element; score: number }> = [];
@@ -955,7 +1245,7 @@ function findBestContentContainer(documentRef: Document): Element | null {
   return candidates[0]?.element ?? null;
 }
 
-function hasMeaningfulArticleContent(container: ParentNode, text: string): boolean {
+function hasMeaningfulArticleContent(container: ParentNode, text: string, sourceUrl?: string): boolean {
   const normalizedText = normalizeExtractedText(text);
   if (normalizedText.length < 180) {
     return false;
@@ -970,12 +1260,35 @@ function hasMeaningfulArticleContent(container: ParentNode, text: string): boole
   const quoteCount = container.querySelectorAll("blockquote").length;
   const codeBlockCount = container.querySelectorAll("pre").length;
   const blockCount = paragraphCount + listCount + quoteCount + codeBlockCount;
+  const sentenceCount = (normalizedText.match(/[.!?。！？]+/g) ?? []).length;
+  const linkCount = container.querySelectorAll("a").length;
+  const noiseHits = countMatchingPatterns(STRUCTURAL_NOISE_PATTERNS, normalizedText);
 
-  if (paragraphCount >= 2 || blockCount >= 3) {
+  if (noiseHits >= 3) {
+    return false;
+  }
+
+  if (noiseHits >= 2 && paragraphCount < 5) {
+    return false;
+  }
+
+  if (linkCount > Math.max(12, paragraphCount * 6) && paragraphCount < 4) {
+    return false;
+  }
+
+  if (sourceUrl && isTelegraphUrl(sourceUrl) && noiseHits >= 1 && paragraphCount < 6) {
+    return false;
+  }
+
+  if (paragraphCount >= 3 && sentenceCount >= 4) {
     return true;
   }
 
-  return normalizedText.length >= 1200;
+  if ((paragraphCount >= 2 || blockCount >= 3) && sentenceCount >= 8 && noiseHits === 0) {
+    return true;
+  }
+
+  return normalizedText.length >= 1800 && sentenceCount >= 12 && noiseHits === 0;
 }
 
 function parseSrcset(srcset: string): Array<{ url: string; width?: number; density?: number }> {
@@ -1013,6 +1326,10 @@ function parseSrcset(srcset: string): Array<{ url: string; width?: number; densi
 }
 
 function sanitizeContent(container: HTMLElement, baseUrl: string): ImageAsset[] {
+  if (isTelegraphUrl(baseUrl)) {
+    stripTelegraphNoise(container);
+  }
+
   const images: ImageAsset[] = [];
   const elements = Array.from(container.querySelectorAll("*"));
 
@@ -4038,6 +4355,19 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           location.hostname === "substack.com" && location.pathname.startsWith("/home/post/");
 
         const normalizeText = (value: string | null | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
+        const isTelegraphHost = location.hostname === "telegraph.co.uk" || location.hostname.endsWith(".telegraph.co.uk");
+        const structuralNoisePatterns = [
+          /This feature is available for registered users/i,
+          /\bGift this article free\b/i,
+          /\bGift article\b/i,
+          /\bShare article\b/i,
+          /\bAdd us as preferred source\b/i,
+          /\bRelated Topics\b/i,
+          /\bRegister\b[\s\S]{0,40}\bLog in\b/i,
+          /\bComment speech bubble icon\b/i
+        ];
+        const countNoiseHits = (value: string) =>
+          structuralNoisePatterns.reduce((count, pattern) => count + (pattern.test(value) ? 1 : 0), 0);
 
         const isRecommendationBlock = (element: Element, text: string) => {
           const normalized = normalizeText(text);
@@ -4081,6 +4411,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           const headingCount = clone.querySelectorAll("h2, h3, h4, h5, h6").length;
           const imageCount = clone.querySelectorAll("img").length;
           const linkCount = clone.querySelectorAll("a").length;
+          const noiseHits = countNoiseHits(text);
 
           let score = Math.min(text.length, 12000);
           score += paragraphCount * 260;
@@ -4090,6 +4421,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           score += headingCount * 110;
           score += imageCount * 30;
           score -= linkCount * 6;
+          score -= noiseHits * 700;
 
           const marker = `${element.getAttribute("class")?.toLowerCase() ?? ""} ${element.getAttribute("id")?.toLowerCase() ?? ""}`;
           if (/(content|body|article|post|markup|prose|story)/.test(marker)) {
@@ -4100,6 +4432,9 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
           }
           if (/(comment|discussion|reply|restack)/.test(marker)) {
             score -= 1200;
+          }
+          if (noiseHits >= 2) {
+            score -= 1600;
           }
 
           return score;
@@ -4141,8 +4476,20 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
 
         const findDeepArticleCandidate = () => {
           const selectors = [
-            "#js_content",                 // 微信公众号正文容器
-            ".rich_media_content",         // 微信公众号正文 class
+            ...(isTelegraphHost
+              ? [
+                  '[itemprop="articleBody"]',
+                  '[data-testid="article-body"]',
+                  '[data-testid*="article-body"]',
+                  '[class*="articleBody"]',
+                  '[class*="article-body"]',
+                  '[class*="ArticleBody"]',
+                  '[class*="story-body"]',
+                  '[class*="storyBody"]'
+                ]
+              : []),
+            "#js_content",
+            ".rich_media_content",
             ".available-content .body.markup",
             ".available-content .markup",
             ".available-content",
@@ -4318,6 +4665,17 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
       };
     }
 
+    if (isTelegraphUrl(preferredUrl)) {
+      const structuredArticle = extractStructuredArticleFromJsonLd(doc, preferredUrl);
+      if (structuredArticle) {
+        console.log(`从 Telegraph 结构化数据提取正文：${structuredArticle.textContent.length} 字符`);
+        return {
+          ...structuredArticle,
+          fetchedAt: Date.now()
+        };
+      }
+    }
+
     const contentContainer = findBestContentContainer(doc);
 
     let contentHtml: string;
@@ -4397,7 +4755,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
     contentHtml = tempContainer.innerHTML;
     textContent = tempContainer.textContent?.trim() ?? "";
 
-    if (!hasMeaningfulArticleContent(tempContainer, textContent)) {
+    if (!hasMeaningfulArticleContent(tempContainer, textContent, preferredUrl)) {
       console.warn("候选容器更像标题区而不是真正文，回退到 Readability");
       const reader = new Readability(doc, { charThreshold: 50 });
       const article = reader.parse();
@@ -4415,7 +4773,7 @@ async function fetchArticleFromTab(tabId: number, url: string): Promise<ArticleD
     finalContainer.innerHTML = contentHtml;
     finalContainer.querySelectorAll("script, style, noscript").forEach(node => node.remove());
 
-    if (!hasMeaningfulArticleContent(finalContainer, textContent)) {
+    if (!hasMeaningfulArticleContent(finalContainer, textContent, preferredUrl)) {
       if (!usedReadability) {
         throw new Error("提取到的内容仍然更像页面头部，未找到真正正文");
       }
@@ -4526,6 +4884,7 @@ function isDynamicContentSite(url: string): boolean {
   const dynamicSites = [
     'substack.com',
     'medium.com',
+    'telegraph.co.uk',
     'twitter.com',
     'x.com',
     'grok.com',
@@ -4571,7 +4930,7 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
 
 请先在浏览器中打开该页面，等待内容完全加载后，再点击扩展图标进行提取。
 
-支持动态加载的网站：Substack, Medium, Twitter/X, Grok, ChatGPT, Gemini, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
+支持动态加载的网站：Substack, Medium, Telegraph, Twitter/X, Grok, ChatGPT, Gemini, LinkedIn, IndieHackers, ProductHunt, Reddit 等。`);
     }
   }
 
@@ -4628,6 +4987,17 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
     };
   }
 
+  if (isTelegraphUrl(url)) {
+    const structuredArticle = extractStructuredArticleFromJsonLd(doc, url);
+    if (structuredArticle) {
+      console.log(`从 Telegraph 结构化数据提取正文：${structuredArticle.textContent.length} 字符`);
+      return {
+        ...structuredArticle,
+        fetchedAt: Date.now()
+      };
+    }
+  }
+
   // 只移除 script 和 style，保留其他元素用于图片提取
   doc.querySelectorAll("script").forEach(node => node.remove());
 
@@ -4639,9 +5009,11 @@ export async function fetchArticle(url: string): Promise<ArticleData> {
   }
 
   const { contentHtml, textContent, images } = buildContentWithFallback(article, doc, url);
+  const finalContainer = doc.createElement("div");
+  finalContainer.innerHTML = contentHtml;
 
   // 验证提取的内容是否足够
-  if (!textContent || textContent.length < 100) {
+  if (!textContent || textContent.length < 100 || !hasMeaningfulArticleContent(finalContainer, textContent, url)) {
     console.warn(`提取的内容过短：${textContent?.length || 0} 字符`);
     throw new Error("提取的内容过短，可能是动态加载网站。请先在浏览器中打开该页面后再试。");
   }
@@ -4671,7 +5043,7 @@ function buildContentWithFallback(
   const primaryImages = sanitizeContent(primaryContainer as HTMLElement, baseUrl);
   const primaryText = primaryContainer.textContent?.trim() ?? "";
 
-  if (primaryText.length >= 200) {
+  if (hasMeaningfulArticleContent(primaryContainer, primaryText, baseUrl)) {
     return {
       contentHtml: primaryContainer.innerHTML,
       textContent: primaryText,
@@ -4696,7 +5068,10 @@ function buildContentWithFallback(
   const fallbackImages = sanitizeContent(fallbackContainer as HTMLElement, baseUrl);
   const fallbackText = fallbackContainer.textContent?.trim() ?? "";
 
-  if (fallbackText.length > primaryText.length) {
+  if (
+    hasMeaningfulArticleContent(fallbackContainer, fallbackText, baseUrl) &&
+    (!hasMeaningfulArticleContent(primaryContainer, primaryText, baseUrl) || fallbackText.length > primaryText.length)
+  ) {
     return {
       contentHtml: fallbackContainer.innerHTML,
       textContent: fallbackText,
@@ -4720,6 +5095,13 @@ function dedupeImages(images: ImageAsset[]): ImageAsset[] {
 export function articleToMarkdown(article: ArticleData): string {
   const wrapper = document.createElement("article");
   wrapper.innerHTML = article.contentHtml;
+  const firstHeading = wrapper.querySelector("h1, h2");
+  if (
+    firstHeading &&
+    normalizeExtractedText(firstHeading.textContent ?? "") === normalizeExtractedText(article.title)
+  ) {
+    firstHeading.remove();
+  }
   const markdownBody = normalizeMarkdown(turndown.turndown(wrapper.innerHTML));
   return `# ${article.title}\n\n${markdownBody}`.trim();
 }
