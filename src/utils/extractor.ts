@@ -5128,8 +5128,20 @@ ${'```'}
   });
 
   const withoutDuplicateOrderedMarkers = withStructuredCodeBlocks.replace(/^(\s*)(\d+)\.\s+\2\.\s+/gm, (_match, indent, index) => `${indent}${index}. `);
+  const segments = withoutDuplicateOrderedMarkers.split(/(```[\s\S]*?```)/g);
+  const normalizedOutsideCodeFences = segments
+    .map(segment => {
+      if (segment.startsWith("```") && segment.endsWith("```")) {
+        return segment;
+      }
 
-  return withoutDuplicateOrderedMarkers
+      return segment
+        .replace(/^[ \t]{4,}(?=!\[[^\n]*\]\([^\n]+\)\s*$)/gm, "")
+        .replace(/^[ \t]{4,}(?=\[!\[[^\n]*\]\([^\n]+\)\]\([^\n]+\)\s*$)/gm, "");
+    })
+    .join("");
+
+  return normalizedOutsideCodeFences
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[\t\u00A0]+/g, " ")
     .trim();
