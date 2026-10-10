@@ -1,6 +1,6 @@
 import type { ArticleData, DownloadRecord, ExportFormat } from "../types/index";
-import { fetchArticle } from "../utils/extractor";
-import { buildExportPayloads } from "../utils/exporters";
+import type { ExportJob, PageIdentity } from "../shared/model";
+import { TERMINAL, matchUrl } from "../shared/model";
 import { slugify, buildDocumentBaseName } from "../utils/files";
 import { t, getFormatOptions, getFormatLabel } from "../utils/i18n";
 
@@ -19,6 +19,16 @@ const state: State = {
   history: [],
   historyFilter: ""
 };
+let backgroundEnabled = false;
+let identity: PageIdentity | undefined;
+let tabId: number | undefined;
+let incognito = false;
+let job: ExportJob | undefined;
+let inputRevision = 0;
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+type StatusSource = "interaction" | "job";
+let statusSource: StatusSource | undefined;
+let fallbackMode = false;
 
 const STORAGE_KEYS = {
   formatSelection: "smartArticleExporter:lastFormats"
@@ -46,7 +56,8 @@ function renderUI() {
           title="${t("versionHistoryButton")}"
         >v${manifestVersion}</button>
       </div>
-      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+      <p id="article-title" class="article-title" hidden></p>
     </div>
     <form id="export-form" class="form-shell">
       <div class="field-group">
@@ -73,6 +84,11 @@ function renderUI() {
         </div>
       </div>
       <button type="submit" id="export-button">${t("downloadButton")}</button>
+      <p id="job-details" class="job-details" hidden></p>
+      <div id="task-actions" class="task-actions" hidden>
+        <button type="button" id="cancel-task">${t("cancelButton")}</button>
+        <button type="button" id="retry-task">${t("retryButton")}</button>
+      </div>
     </form>
   </section>
   <section class="history card card-history" id="history-section">
@@ -95,9 +111,15 @@ const formEl = document.getElementById("export-form") as HTMLFormElement;
 const urlInput = document.getElementById("url-input") as HTMLInputElement;
 const exportButton = document.getElementById("export-button") as HTMLButtonElement;
 const historyList = document.getElementById("history-list") as HTMLDivElement;
+let renderedHistoryMarkup: string | undefined;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
 const versionHistoryLink = document.getElementById("version-history-link") as HTMLButtonElement;
+const articleTitle = document.getElementById("article-title") as HTMLParagraphElement;
+const jobDetails = document.getElementById("job-details") as HTMLParagraphElement;
+const taskActions = document.getElementById("task-actions") as HTMLDivElement;
+const cancelTask = document.getElementById("cancel-task") as HTMLButtonElement;
+const retryTask = document.getElementById("retry-task") as HTMLButtonElement;
 
 exportButton.disabled = true;
 
@@ -109,29 +131,45 @@ formEl
 historySearchInput.addEventListener("input", handleHistorySearchChange);
 historyClearButton.addEventListener("click", handleHistoryClearClick);
 versionHistoryLink.addEventListener("click", openVersionHistory);
+cancelTask.addEventListener("click", () => {
+  if (!job) return;
+  if (statusSource === "interaction") setStatus("");
+  void backgroundRequest("cancel", { jobId: job.id }).then(() => refreshView()).catch(showTaskError);
+});
+retryTask.addEventListener("click", () => {
+  if (!job) return;
+  retryTask.disabled = true;
+  setStatus("");
+  void backgroundRequest("retry", { jobId: job.id }).then(value => { job = value; renderJob(); }).catch(showTaskError).finally(() => { retryTask.disabled = false; });
+});
+window.addEventListener("pagehide", () => { if (pollTimer) clearInterval(pollTimer); });
 
 void initialize();
 
 async function initialize() {
-  await loadHistory();
+  const initialRevision = inputRevision;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  tabId = tab?.id;
+  incognito = !!tab?.incognito;
+  if (incognito) document.getElementById("history-section")!.hidden = true;
+  else await loadHistory();
   await restoreFormatSelection();
-  const activeUrl = await getActiveTabUrl();
-  if (activeUrl) {
-    urlInput.value = activeUrl;
-    await ensureArticle(activeUrl);
-  } else {
-    setStatus(t("statusIdle"));
-    updateExportButtonState();
-  }
+  if (initialRevision === inputRevision && tab?.url && isHttpUrl(tab.url)) urlInput.value = tab.url;
+  try { await refreshView(true); } catch { backgroundEnabled = false; }
+  fallbackMode = !backgroundEnabled;
+  if (fallbackMode) setStatus(t("statusFallback"), true);
+  else pollTimer = setInterval(() => { void refreshView().catch(() => undefined); }, 1000);
+  updateExportButtonState();
 }
 
 function handleUrlInputChange() {
+  inputRevision++;
   state.article = null;
-  if (urlInput.value.trim().length === 0) {
-    setStatus(t("statusIdle"));
-  } else {
-    setStatus(t("statusExtracted"));
-  }
+  job = undefined;
+  articleTitle.hidden = true;
+  jobDetails.hidden = true;
+  taskActions.hidden = true;
+  setStatus("");
   updateExportButtonState();
 }
 
@@ -169,8 +207,9 @@ function handleFormatChange() {
   if (!selected.length) {
     applyFormatSelection(DEFAULT_FORMATS);
     setStatus(t("statusFormatRequired"), true);
-  }
+  } else setStatus("");
   updateExportButtonState();
+  void chrome.storage.local.set({ [STORAGE_KEYS.formatSelection]: getSelectedFormats() });
 }
 
 function handleHistorySearchChange() {
@@ -212,6 +251,18 @@ async function handleExportSubmit(event: Event) {
     return;
   }
 
+  if (backgroundEnabled) {
+    if (state.isExporting) return;
+    state.isExporting = true;
+    updateExportButtonState();
+    setStatus(t("statusQueued"));
+    try {
+      job = await backgroundRequest("submit", { url, tabId, incognito, formats: getSelectedFormats(), requestId: crypto.randomUUID() });
+      renderJob();
+    } catch (error) { state.isExporting = false; showTaskError(error); updateExportButtonState(); }
+    return;
+  }
+
   if (!state.article || state.article.url !== url) {
     const article = await ensureArticle(url);
     if (!article) {
@@ -232,7 +283,8 @@ async function ensureArticle(url: string): Promise<ArticleData | null> {
   setLoading(true);
   setStatus(t("statusExtracting"));
   try {
-    const article = await fetchArticle(url);
+    const { fetchArticle } = await import("../utils/extractor");
+    const article = await fetchArticle(url, { identity: identity && matchUrl(identity.url, url) ? identity : undefined, incognito, preferredTabId: tabId });
     state.article = article;
     if (article.url !== urlInput.value.trim()) {
       urlInput.value = article.url;
@@ -262,10 +314,10 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
     url: article.url,
     timestamp: now.getTime(),
     formats: selectedFormats,
-    status: "success"
+    status: "pending"
   };
 
-  await sendMessage({ type: "addRecord", payload: record });
+  await sendMessage({ type: "addRecord", payload: record, incognito });
   state.history = [record, ...state.history].slice(0, 20);
   renderHistory();
 
@@ -274,15 +326,17 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
   setStatus(t("statusDownloading"));
 
   try {
+    const { buildExportPayloads } = await import("../utils/exporters");
     const payloads = await buildExportPayloads(article, selectedFormats, {
       baseFileName: baseName
     });
 
     for (const payload of payloads) {
-      await triggerBlobDownload(payload.blob, payload.fileName);
+      await triggerBlobDownload(payload.blob, payload.fileName, record, payload.format);
     }
 
     setStatus(t("statusSuccess"), false);
+    await loadHistory();
     await chrome.storage.local.set({ [STORAGE_KEYS.formatSelection]: selectedFormats });
   } catch (error) {
     console.error(error);
@@ -290,12 +344,14 @@ async function exportArticle(article: ArticleData, selectedFormats: ExportFormat
     setStatus(message, true);
     await sendMessage({
       type: "updateRecord",
+      incognito,
       payload: { id: recordId, changes: { status: "error", errorMessage: message } }
     });
     state.history = state.history.map(item =>
       item.id === recordId ? { ...item, status: "error", errorMessage: message } : item
     );
     renderHistory();
+    await loadHistory();
   } finally {
     state.isExporting = false;
     updateExportButtonState();
@@ -309,7 +365,7 @@ function getSelectedFormats(): ExportFormat[] {
 
 async function loadHistory() {
   try {
-    const response = await sendMessage<{ success: boolean; data?: DownloadRecord[] }>({ type: "getHistory" });
+    const response = await sendMessage<{ success: boolean; data?: DownloadRecord[] }>({ type: "getHistory", incognito });
     if (response.success && response.data) {
       state.history = response.data;
       renderHistory();
@@ -350,6 +406,13 @@ function formatHistoryTimestamp(timestamp: number): string {
   }).format(date);
 }
 
+function setHistoryMarkup(markup: string) {
+  // Preserve unchanged nodes so polling does not replay animations or drop focus.
+  if (markup === renderedHistoryMarkup) return;
+  historyList.innerHTML = markup;
+  renderedHistoryMarkup = markup;
+}
+
 function renderHistory() {
   const keyword = state.historyFilter.trim().toLowerCase();
   const filtered = state.history.filter(record => {
@@ -362,11 +425,11 @@ function renderHistory() {
 
   if (!filtered.length) {
     const emptyMessage = state.history.length === 0 ? t("historyEmpty") : t("historyNoMatches");
-    historyList.innerHTML = `<p class="status">${emptyMessage}</p>`;
+    setHistoryMarkup(`<p class="status">${emptyMessage}</p>`);
     return;
   }
 
-  historyList.innerHTML = filtered
+  const markup = filtered
     .map(record => {
       const dateLabel = formatHistoryTimestamp(record.timestamp);
       const formatText = record.formats.map(getFormatLabel).join(" · ");
@@ -375,6 +438,8 @@ function renderHistory() {
       const safeHost = escapeHtmlInline(getHostname(record.url));
       const safeDateLabel = escapeHtmlInline(dateLabel);
       const safeFormatText = escapeHtmlInline(formatText);
+      const statusLabel = record.verified ? record.status === "partial" ? t("historyStatusPartial") : record.status === "cancelled" ? t("historyStatusCancelled") : formatStateLabel(record.status === "success" ? "complete" : "error") : record.status === "pending" ? t("historyStatusPending") : t("historyStatusLegacy");
+      const details = record.results ? Object.entries(record.results).map(([format, result]) => `${getFormatLabel(format as ExportFormat)}: ${formatStateLabel(result.state)}`).join(" · ") : "";
       const errorText = record.errorMessage
         ? `<p class="history-item-error">${escapeHtmlInline(record.errorMessage)}</p>`
         : "";
@@ -384,17 +449,23 @@ function renderHistory() {
             <strong>${safeTitle}</strong>
             <span class="history-item-time">${safeDateLabel}</span>
           </div>
-          <p class="history-item-detail">${safeHost} · ${safeFormatText}</p>
+          <p class="history-item-detail">${safeHost} · ${safeFormatText} · ${escapeHtmlInline(statusLabel)}</p>
+          ${details ? `<p class="history-item-detail">${escapeHtmlInline(details)}</p>` : ""}
           ${errorText}
         </a>
       `;
     })
     .join("");
+  setHistoryMarkup(markup);
 }
 
-function setStatus(message: string, isError = false) {
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+function setStatus(message: string, isError = false, source: StatusSource = "interaction") {
+  // Normal progress stays in the controls; only actionable exceptions use a banner.
+  const notice = isError ? message : fallbackMode ? t("statusFallback") : "";
+  if (statusEl.textContent !== notice) statusEl.textContent = notice;
+  statusEl.hidden = !notice;
+  statusEl.classList.toggle("error", !!notice);
+  statusSource = notice ? source : undefined;
 }
 
 function getLocalizedExtractErrorMessage(error: unknown): string {
@@ -403,6 +474,8 @@ function getLocalizedExtractErrorMessage(error: unknown): string {
   }
 
   const raw = error.message;
+  if (raw.includes("CONTENT_TOO_SHORT")) return t("statusContentTooShort");
+  if (raw.includes("OPEN_PAGE_REQUIRED")) return t("statusDynamicSite");
   const normalized = raw.toLowerCase();
 
   if (
@@ -469,11 +542,10 @@ function setLoading(loading: boolean) {
 
 function updateExportButtonState() {
   const hasUrl = urlInput.value.trim().length > 0;
-  const articleMatchesUrl = state.article && urlsMatch(state.article.url, urlInput.value.trim());
   const hasFormats = getSelectedFormats().length > 0;
   const canExport =
     hasUrl &&
-    !!articleMatchesUrl &&
+    isHttpUrl(urlInput.value.trim()) &&
     !state.isLoading &&
     !state.isExporting &&
     hasFormats;
@@ -483,9 +555,13 @@ function updateExportButtonState() {
   exportButton.classList.toggle("is-busy", state.isLoading || state.isExporting);
   exportButton.setAttribute("aria-disabled", String(!canExport));
   exportButton.dataset.state = state.isExporting ? "exporting" : state.isLoading ? "loading" : canExport ? "ready" : "idle";
+  if (backgroundEnabled) {
+    urlInput.disabled = state.isExporting;
+    formEl.querySelectorAll<HTMLInputElement>('input[name="formats"]').forEach(element => { element.disabled = state.isExporting; });
+  }
 }
 
-function triggerBlobDownload(blob: Blob, filename: string): Promise<number> {
+function triggerBlobDownload(blob: Blob, filename: string, record: DownloadRecord, format: ExportFormat): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     chrome.downloads.download(
@@ -493,14 +569,29 @@ function triggerBlobDownload(blob: Blob, filename: string): Promise<number> {
         url,
         filename,
         saveAs: false,
-        conflictAction: "overwrite"
+        conflictAction: "uniquify"
       },
       downloadId => {
-        URL.revokeObjectURL(url);
         if (chrome.runtime.lastError) {
+          URL.revokeObjectURL(url);
           reject(new Error(chrome.runtime.lastError.message));
         } else {
-          resolve(downloadId ?? -1);
+          void backgroundRequest("legacyDownload", { record, format, downloadId, incognito }).then(async () => {
+            const check = (item: chrome.downloads.DownloadItem) => {
+              if (item.state === "in_progress") return false;
+              chrome.downloads.onChanged.removeListener(listener);
+              URL.revokeObjectURL(url);
+              if (item.state === "complete") resolve(item.id);
+              else reject(new Error(item.error ?? "DOWNLOAD_FAILED"));
+              return true;
+            };
+            const listener = (delta: chrome.downloads.DownloadDelta) => {
+              if (delta.id === downloadId) void chrome.downloads.search({ id: downloadId }).then(items => { if (items[0]) check(items[0]); });
+            };
+            chrome.downloads.onChanged.addListener(listener);
+            const [item] = await chrome.downloads.search({ id: downloadId });
+            if (item) check(item);
+          }).catch(error => { URL.revokeObjectURL(url); reject(error); });
         }
       }
     );
@@ -517,18 +608,6 @@ function sendMessage<T>(message: unknown): Promise<T> {
       resolve(response as T);
     });
   });
-}
-
-async function getActiveTabUrl(): Promise<string | null> {
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
-    if (!tab?.url) return null;
-    return isHttpUrl(tab.url) ? tab.url : null;
-  } catch (error) {
-    console.warn("Failed to get active tab URL", error);
-    return null;
-  }
 }
 
 function isHttpUrl(url: string): boolean {
@@ -548,4 +627,63 @@ function urlsMatch(left: string, right: string): boolean {
   } catch {
     return left.trim() === right.trim();
   }
+}
+
+async function backgroundRequest(type: string, data: Record<string, unknown> = {}): Promise<any> {
+  const response = await sendMessage<{ success: boolean; data?: any; error?: string }>({ target: "background", type, ...data });
+  if (!response?.success) throw new Error(response?.error ?? "BACKGROUND_UNAVAILABLE");
+  return response.data;
+}
+function showTaskError(error: unknown, source: StatusSource = "interaction") {
+  const raw = String(error);
+  const codes = {
+    SOURCE_CHANGED: "statusSourceChanged", SNAPSHOT_EXPIRED: "statusSnapshotExpired", QUEUE_FULL: "statusQueueFull", PDF_FONT_UNAVAILABLE: "statusFontUnavailable", OPEN_PAGE_REQUIRED: "statusDynamicSite", CONTENT_TOO_SHORT: "statusContentTooShort", DOWNLOAD_UNCERTAIN: "statusUncertain", EXTRACTION_FAILED: "statusExtractFailed", WECHAT_RAW_FETCH_FAILED: "statusExtractFailed",
+    PREPARATION_TIMEOUT: "statusTimeout", GENERATION_CANCELLED_OR_TIMEOUT: "statusTimeout", OFFSCREEN_UNAVAILABLE: "statusFallback"
+  } as const;
+  const match = Object.entries(codes).find(([code]) => raw.includes(code));
+  setStatus(t(match ? match[1] : "statusExportFailed"), true, source);
+}
+function formatStateLabel(value: string): string {
+  const keys = { queued: "jobQueued", preparing: "jobPreparing", building: "jobBuilding", downloading: "jobDownloading", complete: "jobComplete", error: "jobError", cancelled: "jobCancelled", uncertain: "jobUncertain" } as const;
+  return t(keys[value as keyof typeof keys] ?? "jobError");
+}
+function renderJob() {
+  if (!job) return;
+  state.isExporting = !TERMINAL.has(job.state);
+  state.isLoading = false;
+  const hasWarnings = Object.values(job.results).some(result => result.warnings?.length);
+  if (job.state === "error") showTaskError(job.error ?? Object.values(job.results).find(result => result.error)?.error, "job");
+  else if (job.state === "partial") setStatus(t(job.articleKey ? "statusPartial" : "statusPartialRefresh"), true, "job");
+  else if (job.state === "uncertain") setStatus(t("statusUncertain"), true, "job");
+  else if (hasWarnings) setStatus(t("exportWarnings"), true, "job");
+  else if (statusSource === "job") setStatus("");
+  articleTitle.textContent = job.title;
+  articleTitle.hidden = false;
+  jobDetails.textContent = job.formats.map(format => `${getFormatLabel(format)}: ${formatStateLabel(job!.results[format]?.state ?? "queued")}`).join(" · ");
+  if (hasWarnings) jobDetails.textContent += ` · ${t("exportWarnings")}`;
+  jobDetails.hidden = false;
+  cancelTask.hidden = !state.isExporting;
+  retryTask.hidden = !job.articleKey || !["partial", "error", "cancelled"].includes(job.state) || Object.values(job.results).some(result => ["uncertain", "downloading"].includes(result.state));
+  taskActions.hidden = cancelTask.hidden && retryTask.hidden;
+  updateExportButtonState();
+}
+async function refreshView(validate = false) {
+  const revision = inputRevision;
+  const response = await backgroundRequest("view", { tabId, validate, incognito });
+  backgroundEnabled = response.supported;
+  identity = response.identity;
+  if (!backgroundEnabled || revision !== inputRevision) return;
+  if (job) {
+    const updated = await backgroundRequest("getJob", { jobId: job.id });
+    if (revision !== inputRevision) return;
+    job = updated;
+    if (job) renderJob();
+  } else if ((validate && response.job) || (identity && urlsMatch(urlInput.value.trim(), identity.url))) {
+    const candidate = response.job;
+    job = candidate && (validate || urlsMatch(urlInput.value.trim(), candidate.url)) ? candidate : undefined;
+    if (job && validate) urlInput.value = job.url;
+    if (job) renderJob();
+    else articleTitle.hidden = true;
+  }
+  if (!incognito) await loadHistory();
 }

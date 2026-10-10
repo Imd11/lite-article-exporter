@@ -27,11 +27,14 @@ For pages that use dynamic loading (e.g. news sites, blog platforms):
 
 | Permission | Reason |
 |---|---|
-| `tabs` / `scripting` | Read page content from already-open tabs, only when triggered by the user |
+| `tabs` / `scripting` | Read explicit exports and eligible articles in the focused active tab for optional automatic preparation |
 | `downloads` | Save exported files to the user's local downloads folder |
 | `storage` | Persist download history locally on the user's device |
-| `host_permissions (<all_urls>)` | Support content extraction from any domain the user has open — no background requests are made |
+| `host_permissions (<all_urls>)` | Support requested URLs and limited automatic preparation; WeChat preparation refetches its same-page HTML |
+| `offscreen` | Parse article snapshots and generate files independently of the popup |
+| `webNavigation` | Discard outdated snapshots after document or route changes |
+| `alarms` | Reconcile accepted jobs with native browser downloads |
 
 ## Privacy
 
-The extension does **not** collect any user data and does **not** send requests to any third-party servers. All processing happens locally in the browser.
+Article processing happens locally. Explicit Word/PDF exports fetch article images, including the existing WeChat image proxy. Article bodies are not uploaded. Session snapshots are temporary; normal export history stays locally on the device. Private tabs are not automatically prepared and private exports do not enter ordinary history. Automatic preparation can be disabled in the popup. See [background preparation details](background-preparation.md).

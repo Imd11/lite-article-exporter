@@ -300,6 +300,14 @@
     "message": "Grok said",
     "description": "导出 Grok 对话中的助手段落标题"
   },
+  "changelog106Item1": {
+    "message": "改进 Telegraph 文章提取，并修复 Markdown 中图片行被误渲染为缩进代码块的问题。",
+    "description": "1.0.6 版本更新项"
+  },
+  "changelog105Item1": {
+    "message": "修复 X 长文章导出中误提取侧栏、导航与快捷键提示的问题，提升正文识别、标题命名和结构保真度。",
+    "description": "1.0.5 版本更新项"
+  },
   "changelog104Item1": {
     "message": "增强 ChatGPT、Gemini、Grok 对话内容导出",
     "description": "1.0.4 版本更新项"
@@ -351,5 +359,137 @@
   "defaultTitle": {
     "message": "未命名文章",
     "description": "默认文章标题"
+  },
+  "statusReady": {
+    "message": "文章已准备好，可以下载",
+    "description": "Background preparation and export task interface"
+  },
+  "statusCanExport": {
+    "message": "选择格式后即可提交下载",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPreparing": {
+    "message": "正在准备文章…",
+    "description": "Background preparation and export task interface"
+  },
+  "statusQueued": {
+    "message": "已提交下载，可以关闭面板。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusBuilding": {
+    "message": "正在生成文件，可以关闭面板。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusNativeDownload": {
+    "message": "浏览器正在下载文件…",
+    "description": "Background preparation and export task interface"
+  },
+  "statusComplete": {
+    "message": "下载完成",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPartial": {
+    "message": "部分格式已完成，可重试失败的格式。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusCancelled": {
+    "message": "已取消剩余导出",
+    "description": "Background preparation and export task interface"
+  },
+  "statusUncertain": {
+    "message": "下载结果待确认，请先检查浏览器下载记录。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusFallback": {
+    "message": "当前浏览器使用按需导出，请在完成前保持面板打开。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusSourceChanged": {
+    "message": "来源页面已变化，请重新导出当前页面。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusTimeout": {
+    "message": "准备或文件生成超时，请重试。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusSnapshotExpired": {
+    "message": "原文章快照已释放，请重新提交导出。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusQueueFull": {
+    "message": "已有三个导出任务，请等待一个完成后再提交。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusFontUnavailable": {
+    "message": "PDF 字体加载失败，请重试 PDF。",
+    "description": "Background preparation and export task interface"
+  },
+  "cancelButton": {
+    "message": "取消剩余导出",
+    "description": "Background preparation and export task interface"
+  },
+  "retryButton": {
+    "message": "重试失败格式",
+    "description": "Background preparation and export task interface"
+  },
+  "jobQueued": {
+    "message": "等待中",
+    "description": "Background preparation and export task interface"
+  },
+  "jobPreparing": {
+    "message": "准备中",
+    "description": "Background preparation and export task interface"
+  },
+  "jobBuilding": {
+    "message": "生成中",
+    "description": "Background preparation and export task interface"
+  },
+  "jobDownloading": {
+    "message": "下载中",
+    "description": "Background preparation and export task interface"
+  },
+  "jobComplete": {
+    "message": "已完成",
+    "description": "Background preparation and export task interface"
+  },
+  "jobError": {
+    "message": "失败",
+    "description": "Background preparation and export task interface"
+  },
+  "jobCancelled": {
+    "message": "已取消",
+    "description": "Background preparation and export task interface"
+  },
+  "jobUncertain": {
+    "message": "待确认",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusPartial": {
+    "message": "部分完成",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusCancelled": {
+    "message": "已取消",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusPending": {
+    "message": "进行中",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusLegacy": {
+    "message": "旧版记录",
+    "description": "Background preparation and export task interface"
+  },
+  "exportWarnings": {
+    "message": "部分图片无法嵌入",
+    "description": "Background preparation and export task interface"
+  },
+  "changelog110Item1": {
+    "message": "支持的文章页面自动准备；关闭面板后导出继续，改进下载历史状态并增加取消和失败重试。",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPartialRefresh": {
+    "message": "部分格式已下载。请选择未完成的格式，重新发起导出。",
+    "description": "Partial export when its snapshot is unavailable for retry"
   }
 }

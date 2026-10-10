@@ -25,8 +25,10 @@ export interface DownloadRecord {
   url: string;
   timestamp: number;
   formats: ExportFormat[];
-  status: "success" | "error";
+  status: "success" | "error" | "partial" | "cancelled" | "pending";
   errorMessage?: string;
+  results?: import("../shared/model").ExportJob["results"];
+  verified?: boolean;
 }
 
 export interface ExtractResponse {

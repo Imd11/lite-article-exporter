@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => ({
       input: {
         "popup/index": resolve(__dirname, "src/popup/index.html"),
         "changelog/index": resolve(__dirname, "src/changelog/index.html"),
+        "offscreen/index": resolve(__dirname, "src/offscreen/index.html"),
         background: resolve(__dirname, "src/background/index.ts")
       },
       output: {

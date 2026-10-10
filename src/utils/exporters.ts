@@ -13,6 +13,8 @@ interface ExportPayload {
 
 interface BuildExportOptions {
   baseFileName: string;
+  signal?: AbortSignal;
+  warnings?: string[];
 }
 
 const DOCX_FONT_FAMILY = "Arial Unicode MS";
@@ -36,10 +38,45 @@ async function loadPdfUnicodeFontBytes(): Promise<Uint8Array> {
         throw new Error(`Failed to load bundled PDF font: ${response.status}`);
       }
       return new Uint8Array(await response.arrayBuffer());
-    })();
+    })().catch(error => {
+      pdfUnicodeFontBytesPromise = null;
+      throw error;
+    });
   }
 
   return pdfUnicodeFontBytesPromise;
+}
+
+export function releaseExportResources() {
+  pdfUnicodeFontBytesPromise = null;
+}
+
+async function fetchImage(url: string, options: BuildExportOptions): Promise<Response> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  const timer = setTimeout(abort, 10000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`IMAGE_HTTP_${response.status}`);
+    const reader = response.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        size += next.value.byteLength;
+        if (size > 20 * 1024 * 1024) { await reader.cancel(); throw new Error("IMAGE_TOO_LARGE"); }
+        chunks.push(next.value);
+      }
+    }
+    return new Response(new Blob(chunks as BlobPart[]), { headers: response.headers });
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+  }
 }
 
 function tokenizeForLineWrap(text: string, measureWidth: (value: string) => number, maxWidth: number): string[] {
@@ -128,7 +165,7 @@ export async function buildExportPayloads(
         });
         break;
       case "word": {
-        const docxBlob = await buildDocx(article);
+        const docxBlob = await buildDocx(article, options);
         payloads.push({
           format,
           fileName: `${options.baseFileName}.docx`,
@@ -137,7 +174,7 @@ export async function buildExportPayloads(
         break;
       }
       case "pdf": {
-        const pdfBlob = await buildPdf(article);
+        const pdfBlob = await buildPdf(article, options);
         payloads.push({
           format,
           fileName: `${options.baseFileName}.pdf`,
@@ -153,7 +190,7 @@ export async function buildExportPayloads(
   return payloads;
 }
 
-async function buildDocx(article: ArticleData): Promise<Blob> {
+async function buildDocx(article: ArticleData, options: BuildExportOptions): Promise<Blob> {
   // 创建文档
   const doc = new Document({
     sections: [{
@@ -167,7 +204,7 @@ async function buildDocx(article: ArticleData): Promise<Blob> {
           },
         },
       },
-      children: await parseContentToDocx(article),
+      children: await parseContentToDocx(article, options),
     }],
   });
 
@@ -176,7 +213,7 @@ async function buildDocx(article: ArticleData): Promise<Blob> {
   return buffer;
 }
 
-async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
+async function parseContentToDocx(article: ArticleData, options: BuildExportOptions): Promise<Paragraph[]> {
   const paragraphs: Paragraph[] = [];
   
   // 添加标题
@@ -224,6 +261,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
   
   // 遍历DOM节点并转换为Word段落
   const processNode = async (node: Node): Promise<void> => {
+    if (options.signal?.aborted) throw new Error("CANCELLED");
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent?.trim();
       if (text) {
@@ -337,7 +375,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
           
           try {
             // 尝试下载并嵌入图片
-            const response = await fetch(imgSrc);
+            const response = await fetchImage(imgSrc, options);
             if (response.ok) {
               const arrayBuffer = await response.arrayBuffer();
               const uint8Array = new Uint8Array(arrayBuffer);
@@ -395,6 +433,8 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
               throw new Error(`Failed to fetch image: ${response.status}`);
             }
           } catch (error) {
+            if (options.signal?.aborted) throw new Error("CANCELLED");
+            options.warnings?.push(imgElement.alt || imgSrc);
             console.warn('Failed to embed image:', imgSrc, error);
             // 如果图片下载失败，使用占位符
             paragraphs.push(
@@ -487,7 +527,7 @@ async function parseContentToDocx(article: ArticleData): Promise<Paragraph[]> {
   return paragraphs;
 }
 
-async function buildPdf(article: ArticleData): Promise<Blob> {
+async function buildPdf(article: ArticleData, options: BuildExportOptions): Promise<Blob> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   
@@ -498,6 +538,7 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
     font = await pdf.embedFont(unicodeFontBytes, { subset: true });
     bold = font;
   } catch (error) {
+    if (/[^\x00-\x7F]/.test(`${article.title}${article.textContent}`)) throw new Error("PDF_FONT_UNAVAILABLE");
     console.warn("无法嵌入 Unicode 字体，使用基础字体回退:", error);
     font = await pdf.embedFont(StandardFonts.Helvetica);
     bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -590,6 +631,7 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
 
   const paragraphs = article.textContent.split(/\n{2,}/);
   for (const paragraph of paragraphs) {
+    if (options.signal?.aborted) throw new Error("CANCELLED");
     const trimmed = paragraph.trim();
     if (!trimmed) continue;
     drawText(trimmed, { fontSize: 12 });
@@ -601,8 +643,9 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
   }
 
   for (const [index, image] of article.images.entries()) {
+    if (options.signal?.aborted) throw new Error("CANCELLED");
     try {
-      const response = await fetch(image.url);
+      const response = await fetchImage(image.url, options);
       if (!response.ok) continue;
       const arrayBuffer = await response.arrayBuffer();
       const contentType = response.headers.get("content-type") || "";
@@ -645,6 +688,8 @@ async function buildPdf(article: ArticleData): Promise<Blob> {
         cursorY -= 6;
       }
     } catch (error) {
+      if (options.signal?.aborted) throw new Error("CANCELLED");
+      options.warnings?.push(image.alt || image.url);
       console.warn("图片写入 PDF 失败", image.url, error);
     }
   }

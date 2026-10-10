@@ -13,6 +13,25 @@ interface ChangelogVersion {
 
 const CHANGELOG: ChangelogVersion[] = [
   {
+    version: "1.1.0",
+    date: "2026-10-10",
+    entries: [{ key: "changelog110Item1" }]
+  },
+  {
+    version: "1.0.6",
+    date: "2026-04-20",
+    entries: [
+      { key: "changelog106Item1" }
+    ]
+  },
+  {
+    version: "1.0.5",
+    date: "2026-04-17",
+    entries: [
+      { key: "changelog105Item1" }
+    ]
+  },
+  {
     version: "1.0.4",
     date: "2026-04-16",
     entries: [
@@ -39,7 +58,8 @@ const CHANGELOG: ChangelogVersion[] = [
     ]
   },
   {
-    version: "0.1.1",
+    // Normalized display label; the original Git version was 0.1.1.
+    version: "1.0.1",
     date: "2026-03-07",
     entries: [
       { key: "changelog011Item1" },
@@ -48,7 +68,8 @@ const CHANGELOG: ChangelogVersion[] = [
     ]
   },
   {
-    version: "0.1.0",
+    // Normalized display label; the original Git version was 0.1.0.
+    version: "1.0.0",
     date: "2025-10-13",
     entries: [
       { key: "changelog010Item1" }
