@@ -28,6 +28,7 @@ try {
   await popup.goto(`chrome-extension://${id}/popup/index.html`);
   await popup.waitForSelector('.history-item');
   assert.equal(await popup.locator('#status').isVisible(), false, 'normal opening must not show a status banner');
+  assert.equal(await popup.locator('#auto-prepare, .auto-prepare').count(), 0, 'the automatic-preparation setting row must be removed');
   await popup.waitForTimeout(350); // Measure the layout after the existing entrance animation.
   const inputTop = (await popup.locator('#url-input').boundingBox()).y;
 
@@ -79,22 +80,6 @@ try {
   await popup.locator('input[name="formats"][value="text"]').check();
   assert.equal(await popup.locator('#status').isVisible(), false, 'correcting the format selection must clear the error');
   console.log('PASS quiet opening and stable layout; errors survive polling and clear on correction');
-  await popup.evaluate(() => {
-    globalThis.__sendBeforeAutoFailure = chrome.runtime.sendMessage;
-    chrome.runtime.sendMessage = function(message, ...args) {
-      if (message?.type !== 'setAuto') return globalThis.__sendBeforeAutoFailure.call(this, message, ...args);
-      const response = { success: false, error: 'BACKGROUND_UNAVAILABLE' };
-      const callback = args.at(-1);
-      if (typeof callback === 'function') { callback(response); return; }
-      return Promise.resolve(response);
-    };
-  });
-  await popup.locator('#auto-prepare').click();
-  await popup.waitForFunction(() => !document.querySelector('#status').hidden);
-  await popup.evaluate(() => { chrome.runtime.sendMessage = globalThis.__sendBeforeAutoFailure; delete globalThis.__sendBeforeAutoFailure; });
-  await popup.locator('#auto-prepare').click();
-  assert.equal(await popup.locator('#status').isVisible(), false, 'retrying an automatic-preparation setting must clear its stale interaction error');
-  console.log('PASS failed setting changes report errors; retrying the setting clears the stale notice');
   await popup.locator('#history-search').fill('规范');
   assert.equal(await popup.locator('.history-item').count(), 2);
   await assertStableHistory('filtered history');

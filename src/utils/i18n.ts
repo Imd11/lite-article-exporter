@@ -6,7 +6,6 @@ import type { ExportFormat } from "../types/index";
  */
 
 export interface I18nKey {
-  autoPrepareLabel: string;
   statusReady: string;
   statusCanExport: string;
   statusPreparing: string;

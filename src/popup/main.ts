@@ -58,7 +58,6 @@ function renderUI() {
       </div>
       <p class="status" id="status" role="status" aria-live="polite" hidden></p>
       <p id="article-title" class="article-title" hidden></p>
-      <label class="auto-prepare"><input type="checkbox" id="auto-prepare" checked /> ${t("autoPrepareLabel")}</label>
     </div>
     <form id="export-form" class="form-shell">
       <div class="field-group">
@@ -116,7 +115,6 @@ let renderedHistoryMarkup: string | undefined;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
 const versionHistoryLink = document.getElementById("version-history-link") as HTMLButtonElement;
-const autoPrepare = document.getElementById("auto-prepare") as HTMLInputElement;
 const articleTitle = document.getElementById("article-title") as HTMLParagraphElement;
 const jobDetails = document.getElementById("job-details") as HTMLParagraphElement;
 const taskActions = document.getElementById("task-actions") as HTMLDivElement;
@@ -133,10 +131,6 @@ formEl
 historySearchInput.addEventListener("input", handleHistorySearchChange);
 historyClearButton.addEventListener("click", handleHistoryClearClick);
 versionHistoryLink.addEventListener("click", openVersionHistory);
-autoPrepare.addEventListener("change", () => {
-  if (statusSource === "interaction") setStatus("");
-  void backgroundRequest("setAuto", { enabled: autoPrepare.checked }).catch(showTaskError);
-});
 cancelTask.addEventListener("click", () => {
   if (!job) return;
   if (statusSource === "interaction") setStatus("");
@@ -163,7 +157,7 @@ async function initialize() {
   if (initialRevision === inputRevision && tab?.url && isHttpUrl(tab.url)) urlInput.value = tab.url;
   try { await refreshView(true); } catch { backgroundEnabled = false; }
   fallbackMode = !backgroundEnabled;
-  if (fallbackMode) { autoPrepare.disabled = true; setStatus(t("statusFallback"), true); }
+  if (fallbackMode) setStatus(t("statusFallback"), true);
   else pollTimer = setInterval(() => { void refreshView().catch(() => undefined); }, 1000);
   updateExportButtonState();
 }
@@ -678,7 +672,6 @@ async function refreshView(validate = false) {
   const response = await backgroundRequest("view", { tabId, validate, incognito });
   backgroundEnabled = response.supported;
   identity = response.identity;
-  autoPrepare.checked = response.autoPrepare;
   if (!backgroundEnabled || revision !== inputRevision) return;
   if (job) {
     const updated = await backgroundRequest("getJob", { jobId: job.id });

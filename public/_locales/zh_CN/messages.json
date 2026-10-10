@@ -360,10 +360,6 @@
     "message": "未命名文章",
     "description": "默认文章标题"
   },
-  "autoPrepareLabel": {
-    "message": "自动准备文章",
-    "description": "Background preparation and export task interface"
-  },
   "statusReady": {
     "message": "文章已准备好，可以下载",
     "description": "Background preparation and export task interface"

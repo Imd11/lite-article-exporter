@@ -2,7 +2,7 @@
 
 ## Scope and behavior
 
-The popup remains the format chooser. Automatic work only targets an article in the focused window's active tab on WeChat, Substack, Medium and Telegraph. It performs a bounded article check followed by the existing site extraction algorithms. There are no permanent page observers or automatic conversation snapshots. The switch in the popup disables new automatic work and clears unpinned cached articles.
+The popup remains the format chooser. Automatic work only targets an article in the focused window's active tab on WeChat, Substack, Medium and Telegraph. It performs a bounded article check followed by the existing site extraction algorithms. There are no permanent page observers or automatic conversation snapshots. Automatic preparation is enabled by default and runs quietly in the background; its existing stored preference is preserved.
 
 Normal opening, automatic preparation, readiness and successful completion do not show a status banner. Automatic preparation does not reveal an extra article-title row. Accepted tasks still expose their per-format progress, cancel/retry controls and history. Banners are reserved for errors, partial or uncertain results, image-embedding warnings and the older-browser instruction to keep the panel open. Passive polling does not erase interaction errors; correcting the relevant input or starting a new operation clears them.
 

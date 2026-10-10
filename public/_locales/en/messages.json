@@ -360,10 +360,6 @@
     "message": "Untitled Article",
     "description": "Default article title"
   },
-  "autoPrepareLabel": {
-    "message": "Prepare articles automatically",
-    "description": "Background preparation and export task interface"
-  },
   "statusReady": {
     "message": "Article ready to download",
     "description": "Background preparation and export task interface"
