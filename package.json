@@ -12,7 +12,7 @@
     "package:chrome": "npm run build && node scripts/package.mjs",
     "package:edge": "npm run build && node scripts/package.mjs edge",
     "test": "node --test tests/background.test.mjs",
-    "test:browser": "npm run build && node tests/browser.mjs"
+    "test:browser": "npm run build && node tests/popup-history.mjs && node tests/browser.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",

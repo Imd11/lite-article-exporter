@@ -110,6 +110,7 @@ const formEl = document.getElementById("export-form") as HTMLFormElement;
 const urlInput = document.getElementById("url-input") as HTMLInputElement;
 const exportButton = document.getElementById("export-button") as HTMLButtonElement;
 const historyList = document.getElementById("history-list") as HTMLDivElement;
+let renderedHistoryMarkup: string | undefined;
 const historySearchInput = document.getElementById("history-search") as HTMLInputElement;
 const historyClearButton = document.getElementById("history-clear") as HTMLButtonElement;
 const versionHistoryLink = document.getElementById("version-history-link") as HTMLButtonElement;
@@ -406,6 +407,13 @@ function formatHistoryTimestamp(timestamp: number): string {
   }).format(date);
 }
 
+function setHistoryMarkup(markup: string) {
+  // Preserve unchanged nodes so polling does not replay animations or drop focus.
+  if (markup === renderedHistoryMarkup) return;
+  historyList.innerHTML = markup;
+  renderedHistoryMarkup = markup;
+}
+
 function renderHistory() {
   const keyword = state.historyFilter.trim().toLowerCase();
   const filtered = state.history.filter(record => {
@@ -418,11 +426,11 @@ function renderHistory() {
 
   if (!filtered.length) {
     const emptyMessage = state.history.length === 0 ? t("historyEmpty") : t("historyNoMatches");
-    historyList.innerHTML = `<p class="status">${emptyMessage}</p>`;
+    setHistoryMarkup(`<p class="status">${emptyMessage}</p>`);
     return;
   }
 
-  historyList.innerHTML = filtered
+  const markup = filtered
     .map(record => {
       const dateLabel = formatHistoryTimestamp(record.timestamp);
       const formatText = record.formats.map(getFormatLabel).join(" · ");
@@ -449,6 +457,7 @@ function renderHistory() {
       `;
     })
     .join("");
+  setHistoryMarkup(markup);
 }
 
 function setStatus(message: string, isError = false) {
