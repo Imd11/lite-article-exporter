@@ -134,9 +134,14 @@ historySearchInput.addEventListener("input", handleHistorySearchChange);
 historyClearButton.addEventListener("click", handleHistoryClearClick);
 versionHistoryLink.addEventListener("click", openVersionHistory);
 autoPrepare.addEventListener("change", () => {
+  if (statusSource === "interaction") setStatus("");
   void backgroundRequest("setAuto", { enabled: autoPrepare.checked }).catch(showTaskError);
 });
-cancelTask.addEventListener("click", () => { if (job) void backgroundRequest("cancel", { jobId: job.id }).then(() => refreshView()).catch(showTaskError); });
+cancelTask.addEventListener("click", () => {
+  if (!job) return;
+  if (statusSource === "interaction") setStatus("");
+  void backgroundRequest("cancel", { jobId: job.id }).then(() => refreshView()).catch(showTaskError);
+});
 retryTask.addEventListener("click", () => {
   if (!job) return;
   retryTask.disabled = true;
