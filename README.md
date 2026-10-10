@@ -84,7 +84,7 @@ The browser suite uses an isolated profile, intercepted article fixtures and a t
 - `offscreen`: parses snapshots and generates files without keeping the popup open
 - `alarms`: reconciles accepted jobs with native browser download states after the worker sleeps
 
-Article processing happens locally. Word/PDF can fetch article images, including the existing `images.weserv.nl` proxy for WeChat images; automatic preparation does not fetch images or fonts. No article body is uploaded by the extension. See [background preparation and privacy details](docs/background-preparation.md).
+Article processing happens locally. Word/PDF can fetch article images, including the existing `images.weserv.nl` proxy for WeChat images; automatic preparation does not fetch images or fonts. No article body is uploaded by the extension. See the [privacy policy](docs/privacy-policy.md) and [background preparation details](docs/background-preparation.md).
 
 ## Background preparation
 
