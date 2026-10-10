@@ -4,6 +4,8 @@
 
 The popup remains the format chooser. Automatic work only targets an article in the focused window's active tab on WeChat, Substack, Medium and Telegraph. It performs a bounded article check followed by the existing site extraction algorithms. There are no permanent page observers or automatic conversation snapshots. The switch in the popup disables new automatic work and clears unpinned cached articles.
 
+Normal opening, automatic preparation, readiness and successful completion do not show a status banner. Automatic preparation does not reveal an extra article-title row. Accepted tasks still expose their per-format progress, cancel/retry controls and history. Banners are reserved for errors, partial or uncertain results, image-embedding warnings and the older-browser instruction to keep the panel open. Passive polling does not erase interaction errors; correcting the relevant input or starting a new operation clears them.
+
 If another preparation or accepted export is busy, one session flag remembers that the active page needs checking. When work becomes idle, the extension checks the latest active tab in the focused window. It does not retain a queue of visited pages or repeatedly retry failed automatic preparations.
 
 WeChat extraction still refetches the article HTML from its own tab with that tab's cookies to recover original, unwatermarked image links. Raw HTML is parsed in the offscreen document. The existing one-second image/lazy-content wait remains. Automatic work neither embeds images nor loads the PDF font. Explicit Word/PDF exports fetch images; the existing WeChat image proxy receives image URLs. Automatic preparation therefore adds a same-page WeChat HTML request, but no article-body upload.

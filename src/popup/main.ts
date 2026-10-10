@@ -25,8 +25,10 @@ let tabId: number | undefined;
 let incognito = false;
 let job: ExportJob | undefined;
 let inputRevision = 0;
-let viewStatus = "idle";
 let pollTimer: ReturnType<typeof setInterval> | undefined;
+type StatusSource = "interaction" | "job";
+let statusSource: StatusSource | undefined;
+let fallbackMode = false;
 
 const STORAGE_KEYS = {
   formatSelection: "smartArticleExporter:lastFormats"
@@ -54,7 +56,7 @@ function renderUI() {
           title="${t("versionHistoryButton")}"
         >v${manifestVersion}</button>
       </div>
-      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
       <p id="article-title" class="article-title" hidden></p>
       <label class="auto-prepare"><input type="checkbox" id="auto-prepare" checked /> ${t("autoPrepareLabel")}</label>
     </div>
@@ -138,6 +140,7 @@ cancelTask.addEventListener("click", () => { if (job) void backgroundRequest("ca
 retryTask.addEventListener("click", () => {
   if (!job) return;
   retryTask.disabled = true;
+  setStatus("");
   void backgroundRequest("retry", { jobId: job.id }).then(value => { job = value; renderJob(); }).catch(showTaskError).finally(() => { retryTask.disabled = false; });
 });
 window.addEventListener("pagehide", () => { if (pollTimer) clearInterval(pollTimer); });
@@ -153,8 +156,9 @@ async function initialize() {
   else await loadHistory();
   await restoreFormatSelection();
   if (initialRevision === inputRevision && tab?.url && isHttpUrl(tab.url)) urlInput.value = tab.url;
-  try { await refreshView(true); } catch { setStatus(t("statusFallback")); }
-  if (!backgroundEnabled) { autoPrepare.disabled = true; setStatus(t("statusFallback")); }
+  try { await refreshView(true); } catch { backgroundEnabled = false; }
+  fallbackMode = !backgroundEnabled;
+  if (fallbackMode) { autoPrepare.disabled = true; setStatus(t("statusFallback"), true); }
   else pollTimer = setInterval(() => { void refreshView().catch(() => undefined); }, 1000);
   updateExportButtonState();
 }
@@ -166,11 +170,7 @@ function handleUrlInputChange() {
   articleTitle.hidden = true;
   jobDetails.hidden = true;
   taskActions.hidden = true;
-  if (urlInput.value.trim().length === 0) {
-    setStatus(t("statusIdle"));
-  } else {
-    setStatus(t("statusCanExport"));
-  }
+  setStatus("");
   updateExportButtonState();
 }
 
@@ -208,7 +208,7 @@ function handleFormatChange() {
   if (!selected.length) {
     applyFormatSelection(DEFAULT_FORMATS);
     setStatus(t("statusFormatRequired"), true);
-  }
+  } else setStatus("");
   updateExportButtonState();
   void chrome.storage.local.set({ [STORAGE_KEYS.formatSelection]: getSelectedFormats() });
 }
@@ -460,9 +460,13 @@ function renderHistory() {
   setHistoryMarkup(markup);
 }
 
-function setStatus(message: string, isError = false) {
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+function setStatus(message: string, isError = false, source: StatusSource = "interaction") {
+  // Normal progress stays in the controls; only actionable exceptions use a banner.
+  const notice = isError ? message : fallbackMode ? t("statusFallback") : "";
+  if (statusEl.textContent !== notice) statusEl.textContent = notice;
+  statusEl.hidden = !notice;
+  statusEl.classList.toggle("error", !!notice);
+  statusSource = notice ? source : undefined;
 }
 
 function getLocalizedExtractErrorMessage(error: unknown): string {
@@ -631,14 +635,14 @@ async function backgroundRequest(type: string, data: Record<string, unknown> = {
   if (!response?.success) throw new Error(response?.error ?? "BACKGROUND_UNAVAILABLE");
   return response.data;
 }
-function showTaskError(error: unknown) {
+function showTaskError(error: unknown, source: StatusSource = "interaction") {
   const raw = String(error);
   const codes = {
     SOURCE_CHANGED: "statusSourceChanged", SNAPSHOT_EXPIRED: "statusSnapshotExpired", QUEUE_FULL: "statusQueueFull", PDF_FONT_UNAVAILABLE: "statusFontUnavailable", OPEN_PAGE_REQUIRED: "statusDynamicSite", CONTENT_TOO_SHORT: "statusContentTooShort", DOWNLOAD_UNCERTAIN: "statusUncertain", EXTRACTION_FAILED: "statusExtractFailed", WECHAT_RAW_FETCH_FAILED: "statusExtractFailed",
     PREPARATION_TIMEOUT: "statusTimeout", GENERATION_CANCELLED_OR_TIMEOUT: "statusTimeout", OFFSCREEN_UNAVAILABLE: "statusFallback"
   } as const;
   const match = Object.entries(codes).find(([code]) => raw.includes(code));
-  setStatus(t(match ? match[1] : "statusExportFailed"), true);
+  setStatus(t(match ? match[1] : "statusExportFailed"), true, source);
 }
 function formatStateLabel(value: string): string {
   const keys = { queued: "jobQueued", preparing: "jobPreparing", building: "jobBuilding", downloading: "jobDownloading", complete: "jobComplete", error: "jobError", cancelled: "jobCancelled", uncertain: "jobUncertain" } as const;
@@ -648,14 +652,16 @@ function renderJob() {
   if (!job) return;
   state.isExporting = !TERMINAL.has(job.state);
   state.isLoading = false;
-  const keys = { queued: "statusQueued", preparing: "statusPreparing", building: "statusBuilding", downloading: "statusNativeDownload", complete: "statusComplete", partial: "statusPartial", error: "statusExportFailed", cancelled: "statusCancelled", uncertain: "statusUncertain" } as const;
-  setStatus(t(keys[job.state]), ["partial", "error", "uncertain"].includes(job.state));
-  if (job.state === "partial" && !job.articleKey) setStatus(t("statusPartialRefresh"), true);
-  if (job.state === "error") showTaskError(job.error ?? Object.values(job.results).find(result => result.error)?.error);
+  const hasWarnings = Object.values(job.results).some(result => result.warnings?.length);
+  if (job.state === "error") showTaskError(job.error ?? Object.values(job.results).find(result => result.error)?.error, "job");
+  else if (job.state === "partial") setStatus(t(job.articleKey ? "statusPartial" : "statusPartialRefresh"), true, "job");
+  else if (job.state === "uncertain") setStatus(t("statusUncertain"), true, "job");
+  else if (hasWarnings) setStatus(t("exportWarnings"), true, "job");
+  else if (statusSource === "job") setStatus("");
   articleTitle.textContent = job.title;
   articleTitle.hidden = false;
   jobDetails.textContent = job.formats.map(format => `${getFormatLabel(format)}: ${formatStateLabel(job!.results[format]?.state ?? "queued")}`).join(" · ");
-  if (Object.values(job.results).some(result => result.warnings?.length)) jobDetails.textContent += ` · ${t("exportWarnings")}`;
+  if (hasWarnings) jobDetails.textContent += ` · ${t("exportWarnings")}`;
   jobDetails.hidden = false;
   cancelTask.hidden = !state.isExporting;
   retryTask.hidden = !job.articleKey || !["partial", "error", "cancelled"].includes(job.state) || Object.values(job.results).some(result => ["uncertain", "downloading"].includes(result.state));
@@ -679,12 +685,7 @@ async function refreshView(validate = false) {
     job = candidate && (validate || urlsMatch(urlInput.value.trim(), candidate.url)) ? candidate : undefined;
     if (job && validate) urlInput.value = job.url;
     if (job) renderJob();
-    else {
-      viewStatus = response.status;
-      setStatus(t(viewStatus === "ready" ? "statusReady" : viewStatus === "preparing" ? "statusPreparing" : "statusCanExport"));
-      articleTitle.textContent = response.title ?? "";
-      articleTitle.hidden = !response.title;
-    }
-  } else setStatus(t("statusCanExport"));
+    else articleTitle.hidden = true;
+  }
   if (!incognito) await loadHistory();
 }

@@ -27,6 +27,9 @@ try {
   });
   await popup.goto(`chrome-extension://${id}/popup/index.html`);
   await popup.waitForSelector('.history-item');
+  assert.equal(await popup.locator('#status').isVisible(), false, 'normal opening must not show a status banner');
+  await popup.waitForTimeout(350); // Measure the layout after the existing entrance animation.
+  const inputTop = (await popup.locator('#url-input').boundingBox()).y;
 
   async function assertStableHistory(description, expectItems = true) {
     await popup.waitForTimeout(350); // Let entry animations finish before observing two real polling cycles.
@@ -68,6 +71,14 @@ try {
   }
 
   await assertStableHistory('idle history');
+  assert.equal((await popup.locator('#url-input').boundingBox()).y, inputTop, 'passive polling must not move the input');
+  await popup.locator('input[name="formats"][value="markdown"]').click(); // The app restores the default when the last format is deselected.
+  assert.equal(await popup.locator('#status.error').isVisible(), true, 'validation errors must remain visible');
+  await assertStableHistory('history with a validation error');
+  assert.equal(await popup.locator('#status.error').isVisible(), true, 'passive polling must not erase an interaction error');
+  await popup.locator('input[name="formats"][value="text"]').check();
+  assert.equal(await popup.locator('#status').isVisible(), false, 'correcting the format selection must clear the error');
+  console.log('PASS quiet opening and stable layout; errors survive polling and clear on correction');
   await popup.locator('#history-search').fill('规范');
   assert.equal(await popup.locator('.history-item').count(), 2);
   await assertStableHistory('filtered history');
@@ -92,6 +103,17 @@ try {
   await assertStableHistory('empty history', false);
   assert.equal((await worker.evaluate(() => chrome.downloads.search({}))).length, 0);
   console.log('PASS history clear; no downloads caused by history polling');
+  await popup.locator('#url-input').fill('https://chatgpt.com/c/missing-test');
+  await popup.locator('#export-button').click();
+  await popup.waitForFunction(() => !document.querySelector('#status').hidden && document.querySelector('#job-details').textContent.includes('Failed'));
+  assert.equal(await popup.locator('#status.error').isVisible(), true, 'failed exports must show a banner');
+  assert.equal(await popup.locator('#export-button').isEnabled(), true, 'failed exports must allow a new request');
+  await popup.waitForTimeout(2300);
+  assert.equal(await popup.locator('#status.error').isVisible(), true, 'failed export errors must survive polling');
+  await popup.locator('#url-input').fill('https://example.org/corrected');
+  assert.equal(await popup.locator('#status').isVisible(), false, 'changing the failed source must clear the old error');
+  assert.equal((await worker.evaluate(() => chrome.downloads.search({}))).length, 0);
+  console.log('PASS real export failure remains visible and clears when the URL is corrected');
 } finally {
   await context?.close();
   await rm(profile, { recursive: true, force: true });

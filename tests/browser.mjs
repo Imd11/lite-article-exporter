@@ -121,12 +121,14 @@ try {
   console.log('PASS automatic article preparation; raw WeChat images; no image/font/export requests');
   await openPopup();
   await wait(() => popup.locator('#export-button').isEnabled(), 'popup initialized');
+  assert.equal(await popup.locator('#status').isVisible(), false, 'prepared pages must not show a routine banner');
+  assert.equal(await popup.locator('#article-title').isVisible(), false, 'automatic preparation must not add a header row');
   if (process.env.ARTICLE_EXPORTER_SCREENSHOT) await popup.screenshot({path: process.env.ARTICLE_EXPORTER_SCREENSHOT, animations:'disabled'});
   const view = await send('view', { tabId: cached.identity.tabId, validate: true });
   assert.equal(view.success, true); assert.equal(view.data.status, 'ready');
   await popup.locator('#url-input').fill('https://example.org/new');
   assert.equal(await popup.locator('#export-button').isEnabled(), true);
-  assert.equal((await popup.locator('#status').innerText()).includes('Extracted'), false);
+  assert.equal(await popup.locator('#status').isVisible(), false);
   console.log('PASS edited URL remains downloadable with accurate status');
   const submission = { tabId: cached.identity.tabId, url: cached.identity.url, formats: ['markdown', 'text', 'word', 'pdf'], incognito: false, requestId: crypto.randomUUID() };
   const [first, duplicate] = await Promise.all([send('submit', submission), send('submit', submission)]);
@@ -160,7 +162,8 @@ try {
   }
   console.log('PASS downloaded files contain Chinese text; Word contains an embedded image');
   await source.bringToFront(); await openPopup();
-  await wait(async () => (await popup.locator('#status').innerText()).includes('complete'), 'completed job displayed on reopening');
+  await wait(async () => (await popup.locator('#job-details').innerText()).includes('Complete'), 'completed job displayed on reopening');
+  assert.equal(await popup.locator('#status').isVisible(), false, 'successful jobs must not show a banner');
   console.log('PASS reopened popup UI displays completed job');
   await source.evaluate(() => { const image=document.querySelector('#js_content img'); image.setAttribute('src','https://mmbiz.qpic.cn/lazy-loaded.png'); image.setAttribute('style','width:300px;height:200px'); image.setAttribute('class','lazyloaded'); });
   assert.equal((await send('view', {tabId:sourceTabId,validate:true})).data.status, 'ready', 'lazy image loading must preserve a valid article snapshot');
@@ -241,7 +244,7 @@ try {
   const resumed = await wait(async () => { const job = await getJob(asleep.data.id); return ['complete','error'].includes(job?.state) && job; }, 'continued job after worker restart');
   assert.equal(resumed.state, 'complete', JSON.stringify(resumed));
   await openPopup();
-  await wait(async () => (await popup.locator('#status').innerText()).includes('complete'), 'manual URL task restored');
+  await wait(async () => (await popup.locator('#job-details').innerText()).includes('Complete'), 'manual URL task restored');
   assert.equal(await popup.locator('#url-input').inputValue(), 'https://example.org/slow-export');
   await cdp.detach();
   console.log('PASS worker restart and closed panel; manual URL task restored with its frozen URL');
@@ -260,8 +263,13 @@ try {
   await openPopup();
   await wait(async () => (await popup.locator('#status').innerText()).includes('Keep this panel open'), 'fallback disclosure');
   assert.equal(await popup.locator('input[name="formats"][value="word"]').isChecked(), true);
+  const historyBeforeFallback = await worker.evaluate(async () => ((await chrome.storage.local.get('downloadHistory')).downloadHistory ?? []).map(record => record.id));
   await popup.locator('#export-button').click();
-  await wait(async () => (await popup.locator('#status').innerText()).includes('Export complete'), 'fallback real export', 60000);
+  await wait(async () => {
+    const history = await worker.evaluate(async () => (await chrome.storage.local.get('downloadHistory')).downloadHistory ?? []);
+    return history.some(record => !historyBeforeFallback.includes(record.id) && record.verified && record.status === 'success') && (await popup.locator('#export-button').getAttribute('data-state')) === 'ready';
+  }, 'fallback real export', 60000);
+  assert.equal(await popup.locator('#status').isVisible(), true, 'fallback must retain its keep-panel-open instruction');
   assert.equal((await popup.locator('#history-list').innerText()).includes('In progress'), false);
   await worker.evaluate(() => { chrome.runtime.getContexts = globalThis.__getContexts; });
   console.log('PASS unavailable-API fallback; remembered formats; accurate completed history');
