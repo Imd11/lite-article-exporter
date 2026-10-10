@@ -11,7 +11,7 @@ const profile = await mkdtemp(path.join(tmpdir(), 'article-exporter-test-'));
 const downloads = await mkdtemp(path.join(tmpdir(), 'article-exporter-downloads-'));
 const extension = path.resolve('dist');
 await mkdir(path.join(profile, 'Default'));
-await writeFile(path.join(profile, 'Default', 'Preferences'), JSON.stringify({ download: { default_directory: downloads, prompt_for_download: false } }));
+await writeFile(path.join(profile, 'Default', 'Preferences'), JSON.stringify({ download: { default_directory: downloads, prompt_for_download: false }, extensions: { ui: { developer_mode: true } } }));
 const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, ignoreDefaultArgs: ['--disable-extensions'], downloadsPath: downloads, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--remote-debugging-port=0'] });
 console.log('Browser started', context.pages().length, context.serviceWorkers().length);
 const errors = [], requests = [];
@@ -33,12 +33,14 @@ function imageFixture() {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header), chunk('IDAT', deflateSync(Buffer.concat(Array.from({length:24},()=>row)))), chunk('IEND', Buffer.alloc(0))]);
 }
 const png = imageFixture();
+let releaseCancellationImage;
+const cancellationImageGate=new Promise(resolve=>{releaseCancellationImage=resolve;});
 // Offscreen documents are OTHER CDP targets, so Playwright's page routing does
 // not intercept their fetches. Intercept those targets before their scripts run.
 const [debugPort, debugPath] = (await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');
 const socket = new WebSocket(`ws://127.0.0.1:${debugPort}${debugPath}`);
 await new Promise((resolve,reject) => { socket.onopen=resolve; socket.onerror=reject; });
-const pending = new Map(); let sequence = 0;
+const pending = new Map(), otherTargets = new Map(); let sequence = 0;
 function targetCommand(sessionId, method, params = {}) {
   const commandId = ++sequence;
   return new Promise((resolve, reject) => {
@@ -58,7 +60,8 @@ socket.onmessage = event => {
     const url = new URL(request.url);
     void (async () => {
       let contentType, body;
-      if (url.hostname === 'images.weserv.nl' || url.hostname === 'mmbiz.qpic.cn') { contentType='image/png'; body=png; }
+      if (url.hostname === 'images.weserv.nl' || url.hostname === 'mmbiz.qpic.cn') { if(request.url.includes('cancel-retry.png')) await cancellationImageGate; contentType='image/png'; body=png; }
+      else if (url.hostname === 'mp.weixin.qq.com' && url.pathname === '/s/private-close') {contentType='text/html;charset=utf-8';body=Buffer.from(html.replaceAll('回归文章','PRIVATE_ONLY_TITLE'));}
       else if (url.hostname === 'example.org') {
         if (url.pathname === '/slow-export') await new Promise(resolve => setTimeout(resolve,1500));
         contentType='text/html;charset=utf-8'; body=Buffer.from(html);
@@ -66,6 +69,7 @@ socket.onmessage = event => {
       await targetCommand(message.sessionId, 'Fetch.fulfillRequest', {requestId,responseCode:200,responseHeaders:[{name:'content-type',value:contentType},{name:'access-control-allow-origin',value:'*'}],body:body.toString('base64')});
     })().catch(error => { if (!/Invalid InterceptionId|Session with given id not found|Target closed/i.test(error.message)) errors.push(error.message); });
   } else if (message.method === 'Target.attachedToTarget') {
+    otherTargets.set(message.params.targetInfo.targetId, {sessionId:message.params.sessionId, ...message.params.targetInfo});
     void (async () => {
       await targetCommand(message.params.sessionId, 'Network.enable');
       await targetCommand(message.params.sessionId, 'Fetch.enable', {patterns:[{urlPattern:'http*',requestStage:'Request'}]});
@@ -171,7 +175,7 @@ try {
     { name: 'Grok', url: 'https://grok.com/c/test', marker: 'GROK_BODY', body: `<div style="width:50%;margin-left:auto">请帮我解释一下这个问题，给出详细的答案？</div><div style="width:80%"><p>GROK_BODY ${paragraph}</p><p>Answer with a second structured paragraph.</p></div>` },
     { name: 'X', url: 'https://x.com/i/article/123', marker: 'X_ARTICLE_BODY', body: `<article data-testid="article-body"><h1>X Article</h1><p>X_ARTICLE_BODY ${paragraph}</p><p>Additional article content.</p></article>` },
     { name: 'Medium', url: 'https://medium.com/@test/article', marker: 'MEDIUM_BODY', body: `<article><h1>Medium Article</h1><p>MEDIUM_BODY ${paragraph}</p><p>${paragraph}</p><p>${paragraph}</p></article>` },
-    { name: 'Telegraph', url: 'https://www.telegraph.co.uk/news/test/', marker: 'TELEGRAPH_BODY', body: `<article><h1>Telegraph Article</h1><div itemprop="articleBody"><p>TELEGRAPH_BODY ${paragraph}</p><p>${paragraph}</p><p>${paragraph}</p></div></article>` },
+    { name: 'Telegraph', url: 'https://www.telegraph.co.uk/news/test/', marker: 'TELEGRAPH_BODY', body: `<article><h1>Telegraph Article</h1><div itemprop="articleBody"><p>TELEGRAPH_BODY ${paragraph}</p><p>${paragraph}</p><p>${paragraph}</p></div></article>`, extra: `<script type="application/ld+json">${JSON.stringify({'@type':'NewsArticle',headline:'Telegraph Article',articleBody:`TELEGRAPH_BODY ${paragraph}\n\n${paragraph}\n\n${paragraph}`})}</script>` },
     { name: 'Substack MAIN', url: 'https://substack.com/home/post/p-42', marker: 'MAIN_WORLD_BODY', body: `<article class="body markup"><p>${paragraph}</p></article>`, extra: `<script>window._preloads=${JSON.stringify({post:{id:42,title:'Substack runtime article',canonical_url:'https://demo.substack.com/p/test',body_html:`<p>MAIN_WORLD_BODY ${paragraph}</p><p>${paragraph}</p><p>${paragraph}</p>`}})};</script>` },
     { name: 'Generic', url: 'https://example.org/generic', marker: 'GENERIC_BODY', body: `<article><h1>Generic Article</h1><p>GENERIC_BODY ${paragraph}</p><ul><li>First item</li><li>Second item</li></ul></article>` }
   ];
@@ -191,6 +195,14 @@ try {
       const updated = await wait(async () => { const job = await getJob(second.data.id); return ['complete','error'].includes(job?.state) && job; }, 'fresh conversation');
       assert.equal(updated.state, 'complete');
       assert.match((await readFile(updated.results.markdown.filename, 'utf8')).replaceAll('\\_', '_'), /NEW_STREAMED_RESPONSE/);
+    }
+    if (fixture.name === 'Telegraph') {
+      await page.evaluate(() => { const script=document.querySelector('script[type="application/ld+json"]'); const data=JSON.parse(script.textContent); data.articleBody+='\n\nNEW_STRUCTURED_BODY'; script.textContent=JSON.stringify(data); });
+      assert.equal((await send('view',{tabId:fixtureTabId,validate:true})).data.status,'idle');
+      const second=await send('submit',{requestId:crypto.randomUUID(),tabId:fixtureTabId,url:fixture.url,formats:['markdown'],incognito:false});
+      const updated=await wait(async()=>{const job=await getJob(second.data.id);return ['complete','error'].includes(job?.state)&&job;},'fresh structured article');
+      assert.equal(updated.state,'complete');
+      assert.match((await readFile(updated.results.markdown.filename,'utf8')).replaceAll('\\_','_'),/NEW_STRUCTURED_BODY/);
     }
     await page.close(); console.log(`PASS existing ${fixture.name} adapter${fixture.name === 'ChatGPT' ? ' and fresh conversation messages' : ''}`);
   }
@@ -278,6 +290,149 @@ try {
   assert.match(largeOutput.replaceAll('\\_','_'),/LARGE_END/);
   await largePage.close();
   console.log('PASS large snapshot bypasses cache without truncation:',Buffer.byteLength(largeOutput),'downloaded bytes');
+  // Exercise the actual toolbar popup, including its unmodified active-tab lookup.
+  await popup.close(); await source.bringToFront();
+  await worker.evaluate(()=>chrome.storage.local.set({'articleExporter:jobs':[]}));
+  const toolbarStart=Date.now();
+  await worker.evaluate(async()=>{await chrome.action.openPopup();});
+  const toolbarTarget=await wait(async()=>(await targetCommand(undefined,'Target.getTargets')).targetInfos.find(target=>target.url===`chrome-extension://${id}/popup/index.html`),'native toolbar target');
+  const toolbar={...toolbarTarget, sessionId:otherTargets.get(toolbarTarget.targetId)?.sessionId ?? (await targetCommand(undefined,'Target.attachToTarget',{targetId:toolbarTarget.targetId,flatten:true})).sessionId};
+  const toolbarEval=async expression=>{
+    const result=await targetCommand(toolbar.sessionId,'Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});
+    if(result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  };
+  await wait(()=>toolbarEval('!!document.querySelector("#url-input")?.value'),'native toolbar initialized');
+  assert.equal(await toolbarEval('document.querySelector("#url-input").value'),source.url());
+  await toolbarEval(`document.querySelectorAll('input[name="formats"]').forEach(input=>{input.checked=input.value==='text';input.dispatchEvent(new Event('change',{bubbles:true}));});document.querySelector('#export-button').click();`);
+  const toolbarJob=await wait(async()=>worker.evaluate(async since=>(await chrome.storage.local.get('articleExporter:jobs'))['articleExporter:jobs'].find(job=>job.createdAt>=since),toolbarStart),'native toolbar accepted task');
+  await targetCommand(undefined,'Target.closeTarget',{targetId:toolbar.targetId});
+  const toolbarDone=await wait(async()=>{const job=await getJob(toolbarJob.id);return ['complete','error'].includes(job?.state)&&job;},'native toolbar closed during export');
+  assert.equal(toolbarDone.state,'complete',JSON.stringify(toolbarDone));
+  assert.equal(toolbarDone.url,source.url());
+  assert.match(await readFile(toolbarDone.results.text.filename,'utf8'),/用于验证导出功能/);
+  console.log('PASS real toolbar popup active-page lookup and export after closing it');
+  await openPopup();
+  await send('setAuto',{enabled:false});
+  {
+  const p='SUBSTACK_ARTICLE_TEXT 这是正文内容，需要足够长来验证导出是否完整。'.repeat(35);
+  const wrapper='https://substack.com/home/post/p-991';
+  const bodyHtml='<p>RUNTIME_ORIGINAL '+p+'</p><p>'+p+'</p><p>'+p+'</p>';
+  await context.route(wrapper,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:'<!doctype html><html><head><meta charset="utf-8"><title>Runtime Review</title></head><body><article class="body markup"><p>'+p+'</p></article><script>window._preloads='+JSON.stringify({post:{id:991,title:'Runtime Review',canonical_url:'https://demo.substack.com/p/review',body_html:bodyHtml}})+';</script></body></html>'}));
+  const runtimePage=await context.newPage();await runtimePage.goto(wrapper);
+  const runtimeTabId=await worker.evaluate(async url=>(await chrome.tabs.query({})).find(t=>t.url===url).id,wrapper);
+  const first=await send('submit',{requestId:crypto.randomUUID(),tabId:runtimeTabId,url:wrapper,formats:['markdown']});
+  const firstJob=await wait(async()=>{const j=await getJob(first.data.id);return ['complete','error'].includes(j?.state)&&j;},'first runtime');
+  assert.equal(firstJob.state,'complete',JSON.stringify(firstJob));assert.ok(firstJob.articleKey);
+  await runtimePage.evaluate(()=>window._preloads.post.body_html+='<p>NEW_RUNTIME_CONTENT_AFTER_CACHE</p>');
+  const second=await send('submit',{requestId:crypto.randomUUID(),tabId:runtimeTabId,url:wrapper,formats:['markdown']});
+  const secondJob=await wait(async()=>{const j=await getJob(second.data.id);return ['complete','error'].includes(j?.state)&&j;},'second runtime');
+  assert.equal(secondJob.state,'complete');
+  const secondFile=(await readFile(secondJob.results.markdown.filename,'utf8')).replaceAll('\\_','_');
+  assert.equal(secondFile.includes('NEW_RUNTIME_CONTENT_AFTER_CACHE'),true);
+  console.log('PASS runtime-only Substack changes invalidate the cached body');
+  await runtimePage.close();
+
+  const canonical='https://demo.substack.com/p/canonical-review', wrapper2='https://substack.com/home/post/p-992';
+  await context.route(canonical,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:'<!doctype html><html><head><meta charset="utf-8"><title>Full Canonical</title></head><body><article class="body markup"><p>FULL_CANONICAL_ARTICLE '+p+'</p><p>'+p+'</p><p>'+p+'</p></article></body></html>'}));
+  await context.route(wrapper2,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:'<!doctype html><html><head><meta charset="utf-8"><title>Preview Wrapper</title><link rel="canonical" href="'+canonical+'"></head><body><article><p>WRAPPER_PREVIEW '+p+'</p><p>'+p+'</p><p>'+p+'</p></article></body></html>'}));
+  const canonicalPage=await context.newPage();await canonicalPage.goto(canonical);
+  const wrapperPage=await context.newPage();await wrapperPage.goto(wrapper2);
+  const wrapperTabId=await worker.evaluate(async url=>(await chrome.tabs.query({})).find(t=>t.url===url).id,wrapper2);
+  const current=await send('submit',{requestId:crypto.randomUUID(),tabId:wrapperTabId,url:wrapper2,formats:['markdown']});
+  const currentJob=await wait(async()=>{const j=await getJob(current.data.id);return ['complete','error'].includes(j?.state)&&j;},'canonical fallback');
+  assert.equal(currentJob.state,'complete',JSON.stringify(currentJob));
+  const currentFile=(await readFile(currentJob.results.markdown.filename,'utf8')).replaceAll('\\_','_');
+  assert.ok(currentFile.includes('FULL_CANONICAL_ARTICLE')); assert.equal(currentFile.includes('WRAPPER_PREVIEW'),false);
+  assert.equal(currentJob.url,wrapper2);
+  await canonicalPage.evaluate(()=>document.querySelector('article').insertAdjacentHTML('beforeend','<p>NEW_CANONICAL_CONTENT</p>'));
+  const freshCanonical=await send('submit',{requestId:crypto.randomUUID(),tabId:wrapperTabId,url:wrapper2,formats:['markdown']});
+  const freshCanonicalJob=await wait(async()=>{const j=await getJob(freshCanonical.data.id);return ['complete','error'].includes(j?.state)&&j;},'fresh canonical document');
+  assert.equal(freshCanonicalJob.state,'complete',JSON.stringify(freshCanonicalJob));
+  assert.match((await readFile(freshCanonicalJob.results.markdown.filename,'utf8')).replaceAll('\\_','_'),/NEW_CANONICAL_CONTENT/);
+  console.log('PASS canonical full body, frozen request URL and fresh canonical content');
+  await canonicalPage.close();await wrapperPage.close();
+
+  await source.goto('about:blank');await source.bringToFront();
+  await send('setAuto',{enabled:true});
+  const a='https://mp.weixin.qq.com/s/auto-A',b='https://mp.weixin.qq.com/s/auto-B';
+  await context.route(a,async route=>{if(route.request().resourceType()==='fetch')await new Promise(r=>setTimeout(r,3000));await route.fulfill({contentType:'text/html;charset=utf-8',body:html});});
+  const pageA=await context.newPage();await pageA.goto(a);await pageA.bringToFront();
+  await wait(async()=>(await state()).preparations.some(op=>op.url===a),'A preparing');
+  const existingPages=new Set(context.pages());
+  const secondWindow=await worker.evaluate(()=>chrome.windows.create({url:'about:blank',focused:true}));
+  const pageB=await wait(async()=>context.pages().find(page=>!existingPages.has(page)),'second window page');
+  await pageB.goto(b);
+  await worker.evaluate(async windowId=>chrome.windows.update(windowId,{focused:true}),secondWindow.id);
+  assert.equal((await worker.evaluate(()=>chrome.windows.getLastFocused())).id,secondWindow.id);
+  await wait(async()=>(await state()).cache.some(entry=>entry.identity.url===a),'A finishes');
+  await wait(async()=>(await state()).cache.some(entry=>entry.identity.url===b),'B automatically resumes after A');
+  const bId=await worker.evaluate(async url=>(await chrome.tabs.query({})).find(t=>t.url===url).id,b);
+  const bView=await send('view',{tabId:bId,validate:true});
+  assert.equal(bView.data.status,'ready');assert.equal((await state()).cache.some(entry=>entry.identity.url===b),true);
+  console.log('PASS busy preparation resumes the latest article in the focused second window');
+  await worker.evaluate(async windowId=>chrome.windows.remove(windowId),secondWindow.id); await pageA.close();
+  }
+  await send('setAuto',{enabled:false});
+  const cancellationUrl='https://mp.weixin.qq.com/s/cancel-building';
+  await context.route(cancellationUrl,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:html.replaceAll('original.png','cancel-retry.png')}));
+  const cancellationPage=await context.newPage();await cancellationPage.goto(cancellationUrl);
+  const cancellationTabId=await worker.evaluate(async url=>(await chrome.tabs.query({})).find(tab=>tab.url===url).id,cancellationUrl);
+  const nativeCount=(await worker.evaluate(()=>chrome.downloads.search({}))).length;
+  const toCancel=await send('submit',{requestId:crypto.randomUUID(),tabId:cancellationTabId,url:cancellationUrl,formats:['word'],incognito:false});
+  await wait(async()=>(await getJob(toCancel.data.id))?.results.word?.state==='building'&&requests.some(url=>url.includes('cancel-retry.png')),'word conversion waiting on image');
+  const oldAttempt=(await getJob(toCancel.data.id)).attemptId;
+  await send('cancel',{jobId:toCancel.data.id});
+  const retried=await send('retry',{jobId:toCancel.data.id});
+  assert.equal(retried.success,true,JSON.stringify(retried));assert.notEqual(retried.data.attemptId,oldAttempt);
+  releaseCancellationImage();
+  const retriedJob=await wait(async()=>{const job=await getJob(toCancel.data.id);return ['complete','error'].includes(job?.state)&&job;},'cancelled word conversion retried');
+  assert.equal(retriedJob.state,'complete',JSON.stringify(retriedJob));
+  assert.equal((await worker.evaluate(()=>chrome.downloads.search({}))).length,nativeCount+1);
+  await cancellationPage.close();
+  console.log('PASS real Word conversion cancellation and immediate retry; one native download');
+  // Enable incognito access only in this disposable test profile.
+  await send('setAuto',{enabled:false});
+  await popup.close();
+  const settings=await context.newPage(); await settings.goto(`chrome://extensions/?id=${id}`);
+  await settings.evaluate(()=>chrome.developerPrivate.updateProfileConfiguration({inDeveloperMode:true}));
+  const restartedWorker=context.waitForEvent('serviceworker',{predicate:item=>item.url()===worker.url(),timeout:15000}).catch(()=>undefined);
+  await settings.evaluate(async extensionId=>new Promise((resolve,reject)=>chrome.developerPrivate.updateExtensionConfiguration({extensionId,incognitoAccess:true},()=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve())),id);
+  await settings.close();
+  if(!popup.isClosed()) await popup.close(); await openPopup();
+  worker=(await restartedWorker) ?? context.serviceWorkers().find(item=>item.url()===worker.url());
+  assert.ok(worker,'extension worker must restart after changing incognito access');
+  assert.equal(await worker.evaluate(()=>new Promise(resolve=>chrome.extension.isAllowedIncognitoAccess(resolve))),true);
+  const targetsBeforePrivate=(await targetCommand(undefined,'Target.getTargets')).targetInfos.map(target=>target.targetId);
+  const privateWindow=await worker.evaluate(()=>chrome.windows.create({incognito:true,url:'about:blank',focused:true}));
+  const privateTabId=privateWindow.tabs[0].id;
+  const privateTarget=await wait(async()=>(await targetCommand(undefined,'Target.getTargets')).targetInfos.find(target=>target.type==='page'&&!targetsBeforePrivate.includes(target.targetId)),'private window target');
+  const privateSession=(await targetCommand(undefined,'Target.attachToTarget',{targetId:privateTarget.targetId,flatten:true})).sessionId;
+  await targetCommand(privateSession,'Fetch.enable',{patterns:[{urlPattern:'http*',requestStage:'Request'}]});
+  const privateUrl='https://mp.weixin.qq.com/s/private-close';
+  await targetCommand(privateSession,'Page.navigate',{url:privateUrl});
+  await wait(async()=>worker.evaluate(async tabId=>{const tab=await chrome.tabs.get(tabId);return tab.url==='https://mp.weixin.qq.com/s/private-close'&&tab.status==='complete';},privateTabId),'private article loaded');
+  await worker.evaluate(()=>{
+    globalThis.__nativeDownload=chrome.downloads.download;globalThis.__nativeCancel=chrome.downloads.cancel;globalThis.__cancelledIds=[];
+    chrome.downloads.download=options=>new Promise(resolve=>{globalThis.__releasePrivateDownload=async()=>resolve(await globalThis.__nativeDownload(options));});
+    chrome.downloads.cancel=async id=>{globalThis.__cancelledIds.push(id);return globalThis.__nativeCancel(id);};
+  });
+  const privateJob=await send('submit',{requestId:crypto.randomUUID(),tabId:privateTabId,url:privateUrl,formats:['text'],incognito:true});
+  assert.equal(privateJob.success,true,JSON.stringify(privateJob));
+  await wait(()=>worker.evaluate(()=>!!globalThis.__releasePrivateDownload),'private download waiting for native ID');
+  await worker.evaluate(async windowId=>chrome.windows.remove(windowId),privateWindow.id);
+  await wait(async()=>(await state()).privateJobs.length===0&&(await state()).cancelledDownloads.length===1,'last private window cleanup');
+  const privateState=await state();
+  assert.equal(JSON.stringify(privateState).includes(privateUrl),false);
+  assert.equal(JSON.stringify(privateState).includes('PRIVATE_ONLY_TITLE'),false);
+  assert.equal(JSON.stringify(await worker.evaluate(()=>chrome.storage.local.get(null))).includes(privateUrl),false);
+  await worker.evaluate(async()=>{await globalThis.__releasePrivateDownload();});
+  await wait(async()=>(await state()).cancelledDownloads.length===0,'late private download cancellation confirmed');
+  const cancelledIds=await worker.evaluate(()=>globalThis.__cancelledIds);
+  assert.ok(cancelledIds.length>0);
+  for(const downloadId of cancelledIds) assert.notEqual((await worker.evaluate(async id=>(await chrome.downloads.search({id}))[0],downloadId)).state,'in_progress');
+  await worker.evaluate(()=>{chrome.downloads.download=globalThis.__nativeDownload;chrome.downloads.cancel=globalThis.__nativeCancel;});
+  console.log('PASS actual last private window closure; late native ID cancellation; no private article/job in storage');
   assert.deepEqual(errors, []);
 } finally {
   for (const handler of pending.values()) clearTimeout(handler.timer);

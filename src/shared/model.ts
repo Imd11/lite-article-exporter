@@ -11,6 +11,7 @@ export type JobState = "queued" | "preparing" | "building" | "downloading" | "co
 export type FormatState = "queued" | "building" | "downloading" | "complete" | "error" | "cancelled" | "uncertain";
 export interface FormatResult {
   state: FormatState;
+  attemptId?: string;
   downloadId?: number;
   blobUrl?: string;
   filename?: string;
@@ -19,6 +20,8 @@ export interface FormatResult {
 }
 export interface ExportJob {
   id: string;
+  attemptId?: string;
+  cancelRequested?: boolean;
   requestId: string;
   url: string;
   identity?: PageIdentity;
@@ -39,6 +42,7 @@ export interface CacheEntry {
   key: string;
   identity: PageIdentity;
   fingerprint: string;
+  dependencies?: Array<{ identity: PageIdentity; fingerprint: string }>;
   version: number;
   article: ArticleData;
   touchedAt: number;
@@ -48,13 +52,25 @@ export interface Preparation {
   id: string;
   url: string;
   identity?: PageIdentity;
+  sources?: PageIdentity[];
+  sourceUrls?: string[];
+  dependencies?: Array<{ identity: PageIdentity; fingerprint: string }>;
   incognito: boolean;
   fingerprint: string;
   mode: "automatic" | "user";
   jobIds: string[];
   startedAt: number;
 }
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;
+export function blobKey(jobId: string, format: ExportFormat, attemptId?: string): string {
+  return attemptId ? `${jobId}:${attemptId}:${format}` : `${jobId}:${format}`;
+}
+export function boundedFingerprint(value: string): string {
+  if (value.length > 1500000) return "";
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return `${value.length}:${hash >>> 0}`;
+}
 export const FORMATS: ExportFormat[] = ["markdown", "text", "word", "pdf"];
 export const TERMINAL = new Set<JobState>(["complete", "partial", "error", "cancelled", "uncertain"]);
 export function identityKey(identity: PageIdentity): string {

@@ -1,7 +1,7 @@
 import { fetchArticle, articleToMarkdown, articleToPlainText } from "../utils/extractor";
 import { setTranslations } from "../utils/i18n";
 import type { ArticleData, ExportFormat } from "../types/index";
-import { FORMATS, type ExportJob, type Preparation } from "../shared/model";
+import { blobKey, FORMATS, type ExportJob, type Preparation } from "../shared/model";
 
 const operations = new Map<string, AbortController>();
 const jobs = new Map<string, AbortController>();
@@ -23,7 +23,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     respond({ success: true }); return;
   }
   if (message.type === "cancel") {
-    operations.get(message.id)?.abort(); jobs.get(message.id)?.abort();
+    operations.get(message.id)?.abort();
+    for (const [key, controller] of jobs) if (message.attemptId ? key === `${message.id}:${message.attemptId}` : key.startsWith(`${message.id}:`)) controller.abort();
     snapshots.delete(message.id);
     respond({ success: true }); return;
   }
@@ -43,14 +44,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     respond({ success: true }); return;
   }
   if (message.type === "build") {
-    const runId = `${message.job.id}:${message.attempt}`;
+    const runId = `${message.job.id}:${message.job.attemptId}`;
     if (!seen.has(runId)) {
       seen.add(runId);
-      const controller = new AbortController(); jobs.set(message.job.id, controller);
+      const controller = new AbortController(); jobs.set(runId, controller);
       setTranslations(message.messages, message.language);
       const article = message.article ?? snapshots.get(message.operationId);
       buildTail = buildTail.catch(() => undefined).then(() => build(message.job, article, message.baseName, controller)).finally(() => {
-        if (jobs.get(message.job.id) === controller) jobs.delete(message.job.id);
+        jobs.delete(runId);
         snapshots.delete(message.operationId);
         if (!jobs.size) exporters?.releaseExportResources();
         void report("processorIdle", {}).catch(() => undefined);
@@ -81,7 +82,7 @@ async function build(job: ExportJob, article: ArticleData | undefined, baseName:
     if (!article) throw new Error("SNAPSHOT_LOST");
     for (const format of FORMATS.filter(format => job.formats.includes(format) && job.results[format]?.state !== "complete")) {
       if (controller.signal.aborted) break;
-      const allowed = await report("formatStarted", { jobId: job.id, format });
+      const allowed = await report("formatStarted", { jobId: job.id, attemptId: job.attemptId, format });
       if (!allowed?.success) break;
       const timer = setTimeout(() => controller.abort(), 180000);
       const warnings: string[] = [];
@@ -95,16 +96,16 @@ async function build(job: ExportJob, article: ArticleData | undefined, baseName:
           [payload] = await exporters.buildExportPayloads(article, [format], { baseFileName: baseName, signal: controller.signal, warnings });
         }
         if (controller.signal.aborted) throw new Error("CANCELLED");
-        const key = `${job.id}:${format}`;
+        const key = blobKey(job.id, format, job.attemptId);
         const blobUrl = URL.createObjectURL(payload.blob); blobs.set(key, blobUrl);
-        const result = await report("payloadReady", { jobId: job.id, format, blobUrl, filename: payload.fileName, warnings });
+        const result = await report("payloadReady", { jobId: job.id, attemptId: job.attemptId, format, blobUrl, filename: payload.fileName, warnings });
         if (!result?.success) { URL.revokeObjectURL(blobUrl); blobs.delete(key); }
       } catch (error) {
-        await report("formatFailed", { jobId: job.id, format, error: controller.signal.aborted ? "GENERATION_CANCELLED_OR_TIMEOUT" : String(error) });
+        await report("formatFailed", { jobId: job.id, attemptId: job.attemptId, format, error: controller.signal.aborted ? "GENERATION_CANCELLED_OR_TIMEOUT" : String(error) });
       } finally { clearTimeout(timer); }
     }
-    await report("buildFinished", { jobId: job.id, aborted: controller.signal.aborted });
+    await report("buildFinished", { jobId: job.id, attemptId: job.attemptId, aborted: controller.signal.aborted });
   } catch (error) {
-    await report("buildFailed", { jobId: job.id, error: String(error) }).catch(() => undefined);
+    await report("buildFailed", { jobId: job.id, attemptId: job.attemptId, error: String(error) }).catch(() => undefined);
   }
 }

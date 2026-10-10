@@ -649,7 +649,7 @@ function renderJob() {
   if (Object.values(job.results).some(result => result.warnings?.length)) jobDetails.textContent += ` · ${t("exportWarnings")}`;
   jobDetails.hidden = false;
   cancelTask.hidden = !state.isExporting;
-  retryTask.hidden = !job.articleKey || !["partial", "error", "cancelled"].includes(job.state) || Object.values(job.results).some(result => result.state === "uncertain");
+  retryTask.hidden = !job.articleKey || !["partial", "error", "cancelled"].includes(job.state) || Object.values(job.results).some(result => ["uncertain", "downloading"].includes(result.state));
   taskActions.hidden = cancelTask.hidden && retryTask.hidden;
   updateExportButtonState();
 }

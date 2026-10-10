@@ -45,7 +45,21 @@ export function probeArticle(expectedUrl: string) {
   });
   const metadata = Array.from(document.querySelectorAll('head meta, head link[rel="canonical"]')).map(node => node.outerHTML).join("\n");
   const headline = document.querySelector("#activity-name, h1")?.textContent ?? "";
-  const value = `${document.title}\n${headline}\n${metadata}\n${text}\n${JSON.stringify(structure)}`;
+  // Some adapters read structured/preloaded content outside the visible article.
+  const sourceParts: string[] = [];
+  let sourceLength = 0, scannedLength = 0;
+  for (const script of document.scripts) {
+    const content = script.textContent ?? "";
+    scannedLength += content.length;
+    if (scannedLength > 1500000) return { eligible: false, fingerprint: "", title: document.title };
+    if (script.type !== "application/ld+json" && !/_preloads|body_html/.test(content)) continue;
+    sourceLength += content.length;
+    if (sourceLength > 1500000) return { eligible: false, fingerprint: "", title: document.title };
+    sourceParts.push(content);
+  }
+  const sourceScripts = sourceParts.join("\n");
+  const value = `${document.title}\n${headline}\n${metadata}\n${sourceScripts}\n${text}\n${JSON.stringify(structure)}`;
+  if (value.length > 1500000) return { eligible: false, fingerprint: "", title: document.title };
   let hash = 2166136261;
   for (let index = 0; index < value.length; index++) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
   return { eligible, fingerprint: `${value.length}:${hash >>> 0}`, title: document.title };

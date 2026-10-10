@@ -1,6 +1,6 @@
 import { clearPrivateWhenClosed, cleanIdle, downloadChanged, handle, invalidate, prepareActive, reconcile } from "./engine";
 const popupCommands = new Set(["view", "getJob", "submit", "retry", "cancel", "setAuto", "getHistory", "clearHistory", "addRecord", "updateRecord", "legacyDownload"]);
-const processorCommands = new Set(["capturePage", "findTab", "prepared", "prepareFailed", "payloadReady", "formatStarted", "formatFailed", "buildFailed", "buildFinished", "processorIdle"]);
+const processorCommands = new Set(["capturePage", "findTab", "resolveCanonical", "prepared", "prepareFailed", "payloadReady", "formatStarted", "formatFailed", "buildFailed", "buildFinished", "processorIdle"]);
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.target && message.target !== "background") return;
   if (sender.id !== chrome.runtime.id) return;

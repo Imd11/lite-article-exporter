@@ -3,7 +3,7 @@ import type { ReadabilityResult } from "@mozilla/readability";
 import TurndownService from "turndown";
 import type { ArticleData, ImageAsset } from "../types/index";
 import { t } from "./i18n";
-import { capturePage, findTabForUrl, type ExtractionContext } from "./page-capture";
+import { canonicalContext, capturePage, findTabForUrl, type ExtractionContext } from "./page-capture";
 
 type SerializedSubstackRuntimeArticle = {
   title?: string;
@@ -1625,10 +1625,10 @@ async function fetchArticleFromTab(tabId: number, url: string, context?: Extract
     console.log(`从标签页获取：${imageStates.length} 张图片`);
 
     const resolvedCanonicalUrl = canonicalUrl ? absolutifyUrl(canonicalUrl, url) : null;
-    if (!context?.identity && shouldResolveCanonicalSourceUrl(url, resolvedCanonicalUrl)) {
+    if (shouldResolveCanonicalSourceUrl(url, resolvedCanonicalUrl)) {
       try {
         console.log(`检测到 Substack 包装页，转为抓取 canonical 地址：${resolvedCanonicalUrl}`);
-        return await fetchArticle(resolvedCanonicalUrl, context);
+        return await fetchArticle(resolvedCanonicalUrl, await canonicalContext(resolvedCanonicalUrl, context));
       } catch (error) {
         console.warn("抓取 canonical 地址失败，回退到当前标签页内容", error);
       }
@@ -1646,10 +1646,10 @@ async function fetchArticleFromTab(tabId: number, url: string, context?: Extract
     doc.head?.prepend(base);
 
     const substackCanonicalUrl = extractSubstackCanonicalUrl(doc, url);
-    if (!context?.identity && shouldResolveCanonicalSourceUrl(url, substackCanonicalUrl)) {
+    if (shouldResolveCanonicalSourceUrl(url, substackCanonicalUrl)) {
       try {
         console.log(`从页面预加载数据检测到 Substack canonical 地址：${substackCanonicalUrl}`);
-        return await fetchArticle(substackCanonicalUrl, context);
+        return await fetchArticle(substackCanonicalUrl, await canonicalContext(substackCanonicalUrl, context));
       } catch (error) {
         console.warn("根据预加载数据抓取 canonical 地址失败，继续回退当前页面内容", error);
       }
