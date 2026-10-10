@@ -1,6 +1,6 @@
 {
   "name": "lite-article-exporter",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,9 @@
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "package:chrome": "npm run build && node scripts/package.mjs",
-    "package:edge": "npm run build && node scripts/package.mjs edge"
+    "package:edge": "npm run build && node scripts/package.mjs edge",
+    "test": "node --test tests/background.test.mjs",
+    "test:browser": "npm run build && node tests/browser.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
@@ -25,6 +27,10 @@
     "@types/turndown": "^5.0.5",
     "archiver": "^7.0.1",
     "buffer": "^6.0.3",
+    "esbuild": "^0.21.5",
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^5.6.205",
+    "playwright": "^1.62.1",
     "ts-node": "^10.9.2",
     "tslib": "^2.6.2",
     "typescript": "^5.3.3",

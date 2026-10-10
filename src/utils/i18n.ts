@@ -6,6 +6,40 @@ import type { ExportFormat } from "../types/index";
  */
 
 export interface I18nKey {
+  autoPrepareLabel: string;
+  statusReady: string;
+  statusCanExport: string;
+  statusPreparing: string;
+  statusQueued: string;
+  statusBuilding: string;
+  statusNativeDownload: string;
+  statusComplete: string;
+  statusPartial: string;
+  statusPartialRefresh: string;
+  statusCancelled: string;
+  statusUncertain: string;
+  statusFallback: string;
+  statusSourceChanged: string;
+  statusTimeout: string;
+  statusSnapshotExpired: string;
+  statusQueueFull: string;
+  statusFontUnavailable: string;
+  cancelButton: string;
+  retryButton: string;
+  jobQueued: string;
+  jobPreparing: string;
+  jobBuilding: string;
+  jobDownloading: string;
+  jobComplete: string;
+  jobError: string;
+  jobCancelled: string;
+  jobUncertain: string;
+  historyStatusPartial: string;
+  historyStatusCancelled: string;
+  historyStatusPending: string;
+  historyStatusLegacy: string;
+  exportWarnings: string;
+  changelog110Item1: string;
   // 应用标题
   appTitle: string;
   urlInputLabel: string;
@@ -80,6 +114,8 @@ export interface I18nKey {
   geminiRoleAssistantSaid: string;
   grokRoleYouSaid: string;
   grokRoleAssistantSaid: string;
+  changelog106Item1: string;
+  changelog105Item1: string;
   changelog104Item1: string;
   changelog104Item2: string;
   changelog104Item3: string;
@@ -99,13 +135,22 @@ export interface I18nKey {
 
 export type TranslationKey = keyof I18nKey;
 
+let fallbackMessages: Record<string, string> = {};
+let fallbackLanguage = "en";
+export function setTranslations(messages: Record<string, string>, language: string) {
+  fallbackMessages = messages;
+  fallbackLanguage = language;
+}
+
 /**
  * 获取翻译文本
  * @param key 翻译键
  * @returns 翻译后的文本
  */
 export function t(key: TranslationKey, substitutions?: string | string[]): string {
-  return chrome.i18n.getMessage(key, substitutions);
+  if (chrome.i18n?.getMessage) return chrome.i18n.getMessage(key, substitutions);
+  const values = typeof substitutions === "string" ? [substitutions] : substitutions ?? [];
+  return (fallbackMessages[key] ?? key).replace(/\{(\d+)\}/g, (_match, index) => values[Number(index)] ?? "");
 }
 
 /**
@@ -113,7 +158,7 @@ export function t(key: TranslationKey, substitutions?: string | string[]): strin
  * @returns 语言代码，如 'zh-CN' 或 'en'
  */
 export function getCurrentLanguage(): string {
-  return chrome.i18n.getUILanguage();
+  return chrome.i18n?.getUILanguage() ?? fallbackLanguage;
 }
 
 /**

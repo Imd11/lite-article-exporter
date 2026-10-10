@@ -6,7 +6,8 @@ async function moveBuiltHtmlPages() {
   const distDir = resolve(root, "dist");
   const pages = [
     { source: resolve(distDir, "src/popup/index.html"), destination: resolve(distDir, "popup/index.html") },
-    { source: resolve(distDir, "src/changelog/index.html"), destination: resolve(distDir, "changelog/index.html") }
+    { source: resolve(distDir, "src/changelog/index.html"), destination: resolve(distDir, "changelog/index.html") },
+    { source: resolve(distDir, "src/offscreen/index.html"), destination: resolve(distDir, "offscreen/index.html") }
   ];
   let movedAny = false;
 

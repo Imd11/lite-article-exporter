@@ -300,6 +300,14 @@
     "message": "Grok said",
     "description": "Assistant section heading in exported Grok conversations"
   },
+  "changelog106Item1": {
+    "message": "Improved Telegraph article extraction and fixed Markdown image lines that could be rendered as indented code blocks.",
+    "description": "Changelog item for version 1.0.6"
+  },
+  "changelog105Item1": {
+    "message": "Fixed an issue where X longform exports could capture sidebar, navigation, and shortcut text, improving main-content detection, title naming, and structural fidelity.",
+    "description": "Changelog item for version 1.0.5"
+  },
   "changelog104Item1": {
     "message": "Improved conversation export for ChatGPT, Gemini, and Grok.",
     "description": "Changelog item for version 1.0.4"
@@ -351,5 +359,141 @@
   "defaultTitle": {
     "message": "Untitled Article",
     "description": "Default article title"
+  },
+  "autoPrepareLabel": {
+    "message": "Prepare articles automatically",
+    "description": "Background preparation and export task interface"
+  },
+  "statusReady": {
+    "message": "Article ready to download",
+    "description": "Background preparation and export task interface"
+  },
+  "statusCanExport": {
+    "message": "Choose a format and download this page",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPreparing": {
+    "message": "Preparing the article…",
+    "description": "Background preparation and export task interface"
+  },
+  "statusQueued": {
+    "message": "Download requested. You can close this panel.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusBuilding": {
+    "message": "Generating files. You can close this panel.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusNativeDownload": {
+    "message": "Downloading files…",
+    "description": "Background preparation and export task interface"
+  },
+  "statusComplete": {
+    "message": "Download complete",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPartial": {
+    "message": "Some formats completed. Retry the failed formats.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusCancelled": {
+    "message": "Remaining exports cancelled",
+    "description": "Background preparation and export task interface"
+  },
+  "statusUncertain": {
+    "message": "Download result needs confirmation. Check browser downloads before trying again.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusFallback": {
+    "message": "Automatic preparation is unavailable. Keep this panel open while exporting.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusSourceChanged": {
+    "message": "The source page changed. Export the current page again.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusTimeout": {
+    "message": "Preparation or file generation timed out. Please retry.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusSnapshotExpired": {
+    "message": "The original snapshot has expired. Submit a new export.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusQueueFull": {
+    "message": "Three exports are already active. Wait for one to finish.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusFontUnavailable": {
+    "message": "The PDF font could not be loaded. Retry PDF.",
+    "description": "Background preparation and export task interface"
+  },
+  "cancelButton": {
+    "message": "Cancel remaining exports",
+    "description": "Background preparation and export task interface"
+  },
+  "retryButton": {
+    "message": "Retry failed formats",
+    "description": "Background preparation and export task interface"
+  },
+  "jobQueued": {
+    "message": "Queued",
+    "description": "Background preparation and export task interface"
+  },
+  "jobPreparing": {
+    "message": "Preparing",
+    "description": "Background preparation and export task interface"
+  },
+  "jobBuilding": {
+    "message": "Generating",
+    "description": "Background preparation and export task interface"
+  },
+  "jobDownloading": {
+    "message": "Downloading",
+    "description": "Background preparation and export task interface"
+  },
+  "jobComplete": {
+    "message": "Complete",
+    "description": "Background preparation and export task interface"
+  },
+  "jobError": {
+    "message": "Failed",
+    "description": "Background preparation and export task interface"
+  },
+  "jobCancelled": {
+    "message": "Cancelled",
+    "description": "Background preparation and export task interface"
+  },
+  "jobUncertain": {
+    "message": "Needs confirmation",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusPartial": {
+    "message": "Partially completed",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusCancelled": {
+    "message": "Cancelled",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusPending": {
+    "message": "In progress",
+    "description": "Background preparation and export task interface"
+  },
+  "historyStatusLegacy": {
+    "message": "Legacy record",
+    "description": "Background preparation and export task interface"
+  },
+  "exportWarnings": {
+    "message": "Some images could not be embedded",
+    "description": "Background preparation and export task interface"
+  },
+  "changelog110Item1": {
+    "message": "Articles prepare automatically on supported sites. Exports continue after the panel closes, with accurate download history and retry controls.",
+    "description": "Background preparation and export task interface"
+  },
+  "statusPartialRefresh": {
+    "message": "Some formats completed. Select the remaining formats and start a new export.",
+    "description": "Partial export when its snapshot is unavailable for retry"
   }
 }

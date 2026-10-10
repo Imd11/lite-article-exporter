@@ -633,3 +633,10 @@ button[type="submit"].is-busy:not(:disabled) {
 .option-tile {
   animation: fadeIn 0.26s ease;
 }
+
+[hidden] { display: none !important; }
+.auto-prepare { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 10px; color: var(--text-secondary); }
+.auto-prepare input { width: 14px; height: 14px; }
+.article-title, .job-details { margin-top: 8px; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.task-actions { display: flex; gap: 8px; margin-top: 10px; }
+.task-actions button { padding: 8px 10px; font-size: 12px; flex: 1; }

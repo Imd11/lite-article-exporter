@@ -13,6 +13,25 @@ interface ChangelogVersion {
 
 const CHANGELOG: ChangelogVersion[] = [
   {
+    version: "1.1.0",
+    date: "2026-10-10",
+    entries: [{ key: "changelog110Item1" }]
+  },
+  {
+    version: "1.0.6",
+    date: "2026-04-20",
+    entries: [
+      { key: "changelog106Item1" }
+    ]
+  },
+  {
+    version: "1.0.5",
+    date: "2026-04-17",
+    entries: [
+      { key: "changelog105Item1" }
+    ]
+  },
+  {
     version: "1.0.4",
     date: "2026-04-16",
     entries: [
