@@ -56,7 +56,6 @@ function renderUI() {
           title="${t("versionHistoryButton")}"
         >v${manifestVersion}</button>
       </div>
-      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
       <p id="article-title" class="article-title" hidden></p>
     </div>
     <form id="export-form" class="form-shell">
@@ -84,6 +83,7 @@ function renderUI() {
         </div>
       </div>
       <button type="submit" id="export-button">${t("downloadButton")}</button>
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
       <p id="job-details" class="job-details" hidden></p>
       <div id="task-actions" class="task-actions" hidden>
         <button type="button" id="cancel-task">${t("cancelButton")}</button>
