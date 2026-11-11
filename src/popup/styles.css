@@ -130,6 +130,14 @@ label {
 .card-hero {
   padding: 16px 16px 14px;
   flex-shrink: 0;
+  /*
+   * 极限防护：病态长标题/多行错误 + 任务详情 + 操作按钮同时出现时，
+   * 反馈堆叠可能超过整个框架。给 hero 一个上限并让它内部滚动，
+   * 历史区头部因此永远可达，页面本身在任何内容下都不滚动。
+   * 常态内容（约 375px）远低于此上限，不会出现滚动条。
+   */
+  max-height: 520px;
+  overflow-y: auto;
 }
 
 .hero-header {
@@ -647,8 +655,13 @@ button[type="submit"].is-busy:not(:disabled) {
 .task-actions { display: flex; gap: 8px; margin-top: 10px; }
 .task-actions button { padding: 8px 10px; font-size: 12px; flex: 1; }
 
-/* 矮视口护栏：可用高度不足 660px 时回退为内容自适应，宁可整页滚动也不裁切。 */
-@media (max-height: 659px) {
+/*
+ * 矮视口护栏：真实弹窗的视口高度由内容决定（恰好 640px），再被屏幕钳制。
+ * 阈值必须低于框架高度 640px——否则护栏会在正常弹窗中永远生效，甚至引发
+ * "640↔740px"的窗口开合震荡。仅在屏幕钳掉高度（视口 < 640）时回退为
+ * 内容自适应 + 整页滚动，宁可滚动也不裁切。639.5 容忍半像素的 DPR 取整。
+ */
+@media (max-height: 639.5px) {
   html,
   body {
     height: auto;
