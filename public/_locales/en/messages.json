@@ -484,6 +484,10 @@
     "message": "Some images could not be embedded",
     "description": "Background preparation and export task interface"
   },
+  "changelog111Item1": {
+    "message": "Fixed the popup layout: the panel keeps a stable height, only the history list scrolls, status feedback now appears next to the Download button, and the empty gap below it is gone.",
+    "description": "Changelog item for version 1.1.1"
+  },
   "changelog110Item1": {
     "message": "Articles prepare automatically on supported sites. Exports continue after the panel closes, with accurate download history and retry controls.",
     "description": "Background preparation and export task interface"

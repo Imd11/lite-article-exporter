@@ -484,6 +484,10 @@
     "message": "部分图片无法嵌入",
     "description": "Background preparation and export task interface"
   },
+  "changelog111Item1": {
+    "message": "修复面板布局：面板高度保持稳定，仅下载历史列表滚动，状态反馈紧贴 Download 按钮显示，按钮下方的空白不再出现。",
+    "description": "1.1.1 版本更新项"
+  },
   "changelog110Item1": {
     "message": "支持的文章页面自动准备；关闭面板后导出继续，改进下载历史状态并增加取消和失败重试。",
     "description": "Background preparation and export task interface"
