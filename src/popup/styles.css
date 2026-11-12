@@ -43,7 +43,13 @@
 
 html {
   width: 380px;
-  height: 640px;
+  /*
+   * 框架高度 = min(640px, 视口)。真实弹窗的视口由内容决定、再被屏幕钳制：
+   * 高屏拿满 640px 固定骨架；矮屏弹窗恰好贴满视口——表单始终可见，
+   * 页面永不滚动，历史区吸收差额。min() 连续无跳变，不存在阈值切换，
+   * 也就没有"内容变高→窗口变高→再切换"的开合震荡。
+   */
+  height: min(640px, 100vh);
   overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 26%),
@@ -656,32 +662,30 @@ button[type="submit"].is-busy:not(:disabled) {
 .task-actions button { padding: 8px 10px; font-size: 12px; flex: 1; }
 
 /*
- * 矮视口护栏：真实弹窗的视口高度由内容决定（恰好 640px），再被屏幕钳制。
- * 阈值必须低于框架高度 640px——否则护栏会在正常弹窗中永远生效，甚至引发
- * "640↔740px"的窗口开合震荡。仅在屏幕钳掉高度（视口 < 640）时回退为
- * 内容自适应 + 整页滚动，宁可滚动也不裁切。639.5 容忍半像素的 DPR 取整。
+ * 矮视口（弹窗被屏幕钳制在 640px 以下）：收紧表单密度，把省出的空间让给
+ * 历史列表。只改留白与元素高度，不改骨架结构——html 高度是 min(640, 视口)，
+ * 不依赖内容高度，因此这个切换不可能引发窗口尺寸震荡。
  */
 @media (max-height: 639.5px) {
-  html,
-  body {
-    height: auto;
+  input[type="url"],
+  input[type="search"] {
+    padding: 10px 14px;
   }
 
-  html {
-    overflow-y: auto;
+  .option-tile {
+    min-height: 48px;
   }
 
-  main {
-    height: auto;
+  button[type="submit"] {
+    min-height: 50px;
+    padding: 12px 18px;
   }
 
-  .card-hero,
-  .card-history {
-    flex: none;
+  .card-hero {
+    padding: 12px 14px;
   }
 
-  #history-list {
-    flex: none;
-    max-height: 240px;
+  .form-shell {
+    gap: 10px;
   }
 }

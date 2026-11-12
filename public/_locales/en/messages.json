@@ -484,6 +484,10 @@
     "message": "Some images could not be embedded",
     "description": "Background preparation and export task interface"
   },
+  "changelog112Item1": {
+    "message": "The popup now adapts to shorter screens: its height fits the available space, the form always stays visible, and only the history list scrolls.",
+    "description": "Changelog item for version 1.1.2"
+  },
   "changelog111Item1": {
     "message": "Fixed the popup layout: the panel keeps a stable height, only the history list scrolls, status feedback now appears next to the Download button, and the empty gap below it is gone.",
     "description": "Changelog item for version 1.1.1"

@@ -484,6 +484,10 @@
     "message": "部分图片无法嵌入",
     "description": "Background preparation and export task interface"
   },
+  "changelog112Item1": {
+    "message": "修复面板在较矮屏幕上的表现：高度自适应可用空间，任何情况下都保持表单可见，仅历史列表滚动。",
+    "description": "1.1.2 版本更新项"
+  },
   "changelog111Item1": {
     "message": "修复面板布局：面板高度保持稳定，仅下载历史列表滚动，状态反馈紧贴 Download 按钮显示，按钮下方的空白不再出现。",
     "description": "1.1.1 版本更新项"

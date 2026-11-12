@@ -38,6 +38,7 @@ export interface I18nKey {
   historyStatusPending: string;
   historyStatusLegacy: string;
   exportWarnings: string;
+  changelog112Item1: string;
   changelog111Item1: string;
   changelog110Item1: string;
   // 应用标题
